@@ -1,0 +1,25 @@
+{
+  "agents": {
+    "defaults": {
+      "model": "minimaxai/minimax-m2.5",
+      "provider": "nvidia"
+    }
+  },
+  "providers": {
+    "nvidia": {
+      "api_key": "请一定要把它修改成您真实的 Nvidia API Key",
+      "api_base": "https://integrate.api.nvidia.com/v1"
+    },
+    "gemini": {
+      "api_key": "请一定要把它修改成您真实的 Gemini API Key"
+    }
+  },
+  "channels": {
+    "dingtalk": {
+      "enabled": false,
+      "clientId": "在此填入您钉钉应用的 Client ID (AppKey)",
+      "clientSecret": "在此填入您钉钉应用的 Client Secret (AppSecret)",
+      "allowFrom": []
+    }
+  }
+}

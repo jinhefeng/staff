@@ -1,0 +1,53 @@
+# --- 核心本地配置 (必须忽略) ---
+config.json
+.env
+
+# --- Python 相关 ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints
+
+# --- 运行时数据与记忆 (防止泄露隐私或冲突) ---
+# 注意：如果希望共享通用记忆，可以取消忽略某些目录，
+# 但通常建议将本地记忆和会话隔离。
+.nanobot/
+memory/
+logs/
+cron/
+*.pen
+*.pen.lock
+
+# --- OS 特定文件 ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- 开发工具 ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.pydevproject
+.settings/
