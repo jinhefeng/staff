@@ -36,7 +36,7 @@ python -m pip install --upgrade pip --quiet
 echo ">> pip 基础组件升级完毕。"
 
 echo "[阶段 4/4] 正在以开发模式安装 nanobot 智能核心..."
-pip install -e vendor/nanobot --quiet
+pip install -e . --quiet
 echo ">> 核心大脑注入成功。"
 
 echo "=========================================="
