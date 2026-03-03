@@ -30,12 +30,14 @@ class EscalateToMasterTool(Tool):
         self._current_guest_channel = ""
         self._current_guest_chat_id = ""
         self._current_guest_id = ""
+        self._current_guest_name = ""
 
-    def start_turn(self, channel: str, chat_id: str, guest_id: str) -> None:
+    def start_turn(self, channel: str, chat_id: str, guest_id: str, guest_name: str = "") -> None:
         """Call this before each run loop to set context."""
         self._current_guest_channel = channel
         self._current_guest_chat_id = chat_id
         self._current_guest_id = guest_id
+        self._current_guest_name = guest_name or guest_id
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -59,15 +61,17 @@ class EscalateToMasterTool(Tool):
             return "Error: Ticket context not set."
             
         # 1. Create ticket
+        guest_display = self._current_guest_name or self._current_guest_id
         ticket_id = self.ticket_manager.create_ticket(
             guest_id=self._current_guest_id,
             channel=self._current_guest_channel,
             chat_id=self._current_guest_chat_id,
-            content=summary
+            content=summary,
+            guest_name=self._current_guest_name,
         )
 
         # 2. Forward to Master
-        forward_msg = f"🎟️ **TICKET {ticket_id}** (from {self._current_guest_id})\n\n{summary}\n\n*Reply mentioning the ticket ID to resolve this.*"
+        forward_msg = f"🎟️ **TICKET {ticket_id}** (from {guest_display})\n\n{summary}\n\n*Reply mentioning the ticket ID to resolve this.*"
         
         for ch, ch_id in self.master_channels:
             logger.info("Escalating ticket {} to master {}/{}", ticket_id, ch, ch_id)

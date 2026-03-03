@@ -19,8 +19,9 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from nanobot import __version__, __logo__
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ProviderConfig
 from nanobot.utils.helpers import sync_workspace_templates
+from loguru import logger
 
 app = typer.Typer(
     name="nanobot",
@@ -199,15 +200,15 @@ def onboard():
 
 
 
-def _make_provider(config: Config):
+def _make_provider(config: Config, provider_config: ProviderConfig | None, provider_name: str | None, model: str):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
+    p = provider_config
+    if not provider_name:
+        provider_name = config.get_provider_name(model)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
@@ -217,20 +218,22 @@ def _make_provider(config: Config):
     if provider_name == "custom":
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
-            api_base=config.get_api_base(model) or "http://localhost:8000/v1",
+            api_base=(p.api_base if p else None) or "http://localhost:8000/v1",
             default_model=model,
         )
 
+    from nanobot.config.loader import get_config_path
     from nanobot.providers.registry import find_by_name
+    path = get_config_path()
     spec = find_by_name(provider_name)
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
+        console.print(f"[red]Error: No API key configured.[/red]")
+        console.print(f"Set one in {path} under providers section")
         raise typer.Exit(1)
 
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
-        api_base=config.get_api_base(model),
+        api_base=p.api_base if p else None,
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
@@ -257,33 +260,50 @@ def gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     
+    # Initialize logging early
+    import sys
+    logger.remove()
+    log_level = "DEBUG" if verbose else "INFO"
+    logger.add(sys.stderr, level=log_level, colorize=True, backtrace=True, diagnose=True)
+    logger.enable("nanobot")
+    
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
     
+    logger.success("Staff logging initialized (Level: {})", log_level)
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
     
-    # Create cron service first (callback set after agent creation)
+    # 1. Resolve Provider and effective model
+    p_cfg, p_name = config._match_provider()
+    effective_model = (p_cfg.model if p_cfg and p_cfg.model else None) or config.agents.defaults.model
+    effective_tool_use = p_cfg.tool_use if p_cfg else True
+
+    # 2. Initialize correct provider instance
+    provider = _make_provider(config, p_cfg, p_name, effective_model)
+    
+    # Initialize cron service (before agent)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+
+    session_manager = SessionManager(config.workspace_path)
     
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=effective_model,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        tool_use=effective_tool_use,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -296,8 +316,15 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        prompt = (
+            f"【System Timer Triggered】\n"
+            f"The following scheduled task is due NOW:\n"
+            f"\"{job.payload.message}\"\n\n"
+            f"INSTRUCTION: Act immediately! Notify the user in a friendly manner or perform the task directly. "
+            f"CRITICAL: Do NOT use the cron tool to schedule this task again!"
+        )
         response = await agent.process_direct(
-            job.payload.message,
+            prompt,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
@@ -314,6 +341,23 @@ def gateway(
     
     # Create channel manager
     channels = ChannelManager(config, bus)
+
+    # Wire SearchContactsTool to DingTalk directory (lazy: directory initializes on channel.start())
+    if "dingtalk" in channels.channels:
+        dt_channel = channels.channels["dingtalk"]
+
+        async def _search_contacts(keyword: str) -> dict:
+            directory = getattr(dt_channel, "_directory", None)
+            if not directory:
+                return {"users": [], "groups": []}
+            users = await directory.search_users(keyword)
+            groups = await directory.search_groups(keyword)
+            return {"users": users, "groups": groups}
+
+        from nanobot.agent.tools.cross_chat import SearchContactsTool
+        search_tool = agent.tools.get("search_contacts")
+        if isinstance(search_tool, SearchContactsTool):
+            search_tool.set_search_fn(_search_contacts)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -416,33 +460,41 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
     from nanobot.cron.service import CronService
-    from loguru import logger
     
     config = load_config()
     sync_workspace_templates(config.workspace_path)
     
     bus = MessageBus()
-    provider = _make_provider(config)
+    
+    # 1. Resolve Provider and effective model
+    p_cfg, p_name = config._match_provider()
+    effective_model = (p_cfg.model if p_cfg and p_cfg.model else None) or config.agents.defaults.model
+    effective_tool_use = p_cfg.tool_use if p_cfg else True
+
+    # 2. Initialize correct provider instance
+    provider = _make_provider(config, p_cfg, p_name, effective_model)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    if logs:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
+    # Configure loguru: remove default sink and add one with appropriate level
+    logger.remove()
+    log_level = "DEBUG" if logs else "INFO"
+    logger.add(sys.stderr, level=log_level)
+    logger.enable("nanobot")
     
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=effective_model,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        tool_use=effective_tool_use,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,

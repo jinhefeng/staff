@@ -34,11 +34,12 @@ class TicketManager:
         except Exception:
             logger.exception("Failed to save tickets db.")
 
-    def create_ticket(self, guest_id: str, channel: str, chat_id: str, content: str) -> str:
+    def create_ticket(self, guest_id: str, channel: str, chat_id: str, content: str, guest_name: str = "") -> str:
         ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
         self.tickets[ticket_id] = {
             "ticket_id": ticket_id,
             "guest_id": guest_id,
+            "guest_name": guest_name or guest_id,
             "guest_channel": channel,
             "guest_chat_id": chat_id,
             "content": content,
@@ -46,7 +47,7 @@ class TicketManager:
             "pacified": False,
         }
         self._save()
-        logger.info("Created async ticket {} for guest {}", ticket_id, guest_id)
+        logger.info("Created async ticket {} for guest {} ({})", ticket_id, guest_name or guest_id, guest_id)
         return ticket_id
 
     def resolve_ticket(self, ticket_id: str) -> Dict[str, Any] | None:

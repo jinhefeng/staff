@@ -55,6 +55,24 @@ class MemoryStore:
         self.guests_dir = ensure_dir(self.memory_dir / "guests")
         self.global_file = self.core_dir / "global.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self.groups_file = self.core_dir / "groups.json"
+
+    def load_groups(self) -> dict[str, str]:
+        if self.groups_file.exists():
+            try:
+                return json.loads(self.groups_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
+
+    def save_group_info(self, group_id: str, title: str) -> None:
+        """Dynamically save group title & ID for cross-chat targeting."""
+        groups = self.load_groups()
+        orig = groups.get(group_id)
+        if orig != title:
+            groups[group_id] = title
+            self.groups_file.write_text(json.dumps(groups, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.debug("Saved group info: {} ({})", title, group_id)
 
     def read_global(self) -> str:
         if self.global_file.exists():

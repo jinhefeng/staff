@@ -215,6 +215,8 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
+                        preview = (msg.content or "")[:80]
+                        logger.debug("Dispatching outbound to {}:{} — {}", msg.channel, msg.chat_id, preview)
                         await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)

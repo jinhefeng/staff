@@ -222,8 +222,8 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
-    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    model: str = "anthropic/claude-opus-4-5"  # Fallback model if provider has no model bound
+    provider: str = "auto"  # Provider name (e.g. "nvidia-qwen") or "auto" for auto-detection
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
@@ -238,15 +238,26 @@ class AgentsConfig(Base):
 
 
 class ProviderConfig(Base):
-    """LLM provider configuration."""
+    """LLM provider configuration.
+
+    Each provider entry can optionally bind a specific model and control
+    whether tool/function-calling is enabled.
+    """
 
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    model: str | None = None  # Model bound to this provider (e.g. "qwen/qwq-32b")
+    tool_use: bool = True  # Set to false for models that don't support function calling
 
 
 class ProvidersConfig(Base):
-    """Configuration for LLM providers."""
+    """Configuration for LLM providers.
+
+    Known providers are listed as explicit fields for IDE autocompletion.
+    Additional custom providers (e.g. 'nvidia-qwen') can be added freely
+    in the JSON config and will be accessible via model_extra.
+    """
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -266,6 +277,32 @@ class ProvidersConfig(Base):
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="allow",
+    )
+
+    def get_provider_by_name(self, name: str) -> "ProviderConfig | None":
+        """Look up a provider config by name, checking both known fields and dynamic extras."""
+        # 1. Known field (e.g. "nvidia", "gemini")
+        p = getattr(self, name, None)
+        if isinstance(p, ProviderConfig):
+            return p
+        # 2. Dynamic extra (e.g. "nvidia-qwen")
+        extras = self.model_extra or {}
+        # Try exact name, then underscore variant, then camelCase variant
+        raw = extras.get(name) or extras.get(name.replace("-", "_"))
+        if not raw and "-" in name:
+            # Pydantic's alias_generator might have converted hyphenated keys to camelCase in model_extra
+            camel = "".join(x.capitalize() for x in name.split("-"))
+            camel = camel[0].lower() + camel[1:]
+            raw = extras.get(camel)
+            
+        if isinstance(raw, dict):
+            return ProviderConfig.model_validate(raw)
+        if isinstance(raw, ProviderConfig):
+            return raw
+        return None
 
 
 class HeartbeatConfig(Base):
@@ -343,7 +380,10 @@ class Config(BaseSettings):
 
         forced = self.agents.defaults.provider
         if forced != "auto":
-            p = getattr(self.providers, forced, None)
+            p = self.providers.get_provider_by_name(forced)
+            if not p:
+                from loguru import logger
+                logger.warning(f"Forced provider '{forced}' not found in configuration")
             return (p, forced) if p else (None, None)
 
         model_lower = (model or self.agents.defaults.model).lower()

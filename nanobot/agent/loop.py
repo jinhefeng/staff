@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -28,6 +29,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.agent.tickets import TicketManager
 from nanobot.agent.tools.tickets import EscalateToMasterTool, ResolveTicketTool
+from nanobot.agent.tools.cross_chat import SearchContactsTool, SendCrossChatTool
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -59,6 +61,7 @@ class AgentLoop:
         max_tokens: int = 4096,
         memory_window: int = 100,
         reasoning_effort: str | None = None,
+        tool_use: bool = True,
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -78,6 +81,7 @@ class AgentLoop:
         self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.reasoning_effort = reasoning_effort
+        self.tool_use = tool_use
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -150,6 +154,16 @@ class AgentLoop:
             send_callback=self.bus.publish_outbound
         ))
 
+        # Cross-session chat tools (available when DingTalk is enabled)
+        if self.channels_config and hasattr(self.channels_config, "dingtalk"):
+            dt_cfg = getattr(self.channels_config, "dingtalk")
+            if dt_cfg and dt_cfg.enabled:
+                self.tools.register(SearchContactsTool(workspace=self.workspace))
+                self.tools.register(SendCrossChatTool(
+                    send_callback=self.bus.publish_outbound,
+                    workspace=self.workspace,
+                ))
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
@@ -181,10 +195,18 @@ class AgentLoop:
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
-        """Remove <think>…</think> blocks that some models embed in content."""
+        """Remove thinking/reasoning content that models embed in their output.
+
+        Handles:
+        - <think>…</think> blocks (DeepSeek-R1, QWQ via some providers, etc.)
+        - <thought>…</thought> blocks
+        """
         if not text:
             return None
-        return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
+        # Strip common thinking tags
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+        text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
+        return text.strip() or None
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
@@ -197,6 +219,33 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _extract_tool_calls(text: str) -> list:
+        """Extract <tool_call> JSON from plain text. Returns list of boxy-style ChoiceDeltaToolCall."""
+        import json
+        from types import SimpleNamespace
+        
+        calls = []
+        # Find all <tool_call> ... </tool_call> blocks
+        matches = re.finditer(r"<tool_call>\s*({[\s\S]*?})\s*</tool_call>", text)
+        for i, m in enumerate(matches):
+            try:
+                data = json.loads(m.group(1))
+                if "name" in data:
+                    # Map to a structure similar to LiteLLM's tool call object
+                    calls.append(SimpleNamespace(
+                        id=f"ext-{i}",
+                        name=data["name"],
+                        arguments=data.get("arguments", {}),
+                        function=SimpleNamespace(
+                            name=data["name"],
+                            arguments=json.dumps(data.get("arguments", {}))
+                        )
+                    ))
+            except Exception:
+                continue
+        return calls
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -208,17 +257,53 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        tool_defs = self.tools.get_definitions() if self.tool_use else None
+        tools_disabled = not self.tool_use
+        if tools_disabled:
+            logger.info("Tool use disabled by config for model {}", self.model)
+
         while iteration < self.max_iterations:
             iteration += 1
 
+            t0 = time.monotonic()
+            logger.info("LLM call #{} starting...{}", iteration, " (no tools)" if tools_disabled else "")
             response = await self.provider.chat(
                 messages=messages,
-                tools=self.tools.get_definitions(),
+                tools=None if tools_disabled else tool_defs,
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
+            elapsed = time.monotonic() - t0
+            logger.info("LLM call #{} returned in {:.1f}s (finish_reason={})", iteration, elapsed, response.finish_reason)
+
+            # Auto-fallback: if model doesn't support tools, retry without them
+            if (
+                response.finish_reason == "error"
+                and not tools_disabled
+                and iteration == 1
+                and any(kw in (response.content or "").lower() for kw in ("unsupported", "tool", "function"))
+            ):
+                logger.warning("Model {} failed with tool use, retrying without tools", self.model)
+                tools_disabled = True
+                iteration -= 1
+                continue
+
+            # Defensive: Handle models that output tool calls in text (even if finish_reason=stop)
+            # or when LiteLLM didn't catch them as structured tool_calls.
+            if response.content and "<tool_call>" in response.content:
+                logger.info("Detected inline <tool_call> in response content")
+                extracted = self._extract_tool_calls(response.content)
+                if extracted:
+                    # Append extracted calls to any existing ones
+                    if not response.tool_calls:
+                        response.tool_calls = extracted
+                    else:
+                        response.tool_calls.extend(extracted)
+                    response.has_tool_calls = True
+                    # Strip the tool call tags from content so they aren't sent to user
+                    response.content = re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", response.content).strip()
 
             if response.has_tool_calls:
                 if on_progress:
@@ -394,6 +479,12 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
+        # Dynamically record group name for cross-chat search
+        conv_type = msg.metadata.get("conversation_type")
+        conv_title = msg.metadata.get("conversation_title")
+        if conv_type == "2" and conv_title:
+            MemoryStore(self.workspace).save_group_info(msg.chat_id, conv_title)
+
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
@@ -453,7 +544,12 @@ class AgentLoop:
         
         if escalate_tool := self.tools.get("escalate_to_master"):
             if isinstance(escalate_tool, EscalateToMasterTool):
-                escalate_tool.start_turn(msg.channel, msg.chat_id, msg.sender_id)
+                sender_name = msg.metadata.get("sender_name", "")
+                escalate_tool.start_turn(msg.channel, msg.chat_id, msg.sender_id, guest_name=sender_name)
+
+        if cross_chat_tool := self.tools.get("send_cross_chat"):
+            if isinstance(cross_chat_tool, SendCrossChatTool):
+                cross_chat_tool.set_context(sender_id=msg.sender_id, is_master=is_master)
 
         history = session.get_history(max_messages=self.memory_window)
         
@@ -462,22 +558,26 @@ class AgentLoop:
         if not is_master:
             from nanobot.agent.sanitizer import SanitizerAgent
             sanitizer = SanitizerAgent(self.provider, self.model)
+            t_san = time.monotonic()
             verdict, sanitizer_msg = await sanitizer.sanitize_input(msg.content, is_master=is_master)
+            logger.info("Sanitizer input check took {:.1f}s → {}", time.monotonic() - t_san, verdict)
             if verdict == "BLOCK":
                 logger.warning("Input BLOCKED for {}: {}", msg.sender_id, sanitizer_msg)
-                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=sanitizer_msg)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=sanitizer_msg, metadata=msg.metadata or {})
             elif verdict == "ESCALATE":
                 logger.info("Input ESCALATED for {}: {}", msg.sender_id, sanitizer_msg)
+                guest_name = msg.metadata.get("sender_name", msg.sender_id)
                 # Trigger escalate_to_master programmatically
                 if escalate_tool := self.tools.get("escalate_to_master"):
                     if isinstance(escalate_tool, EscalateToMasterTool):
                         await escalate_tool.execute(
-                            summary=f"[Sanitizer Escalation] Guest {msg.sender_id} probing: {sanitizer_msg}",
+                            summary=f"[Sanitizer Escalation] Guest {guest_name} probing: {sanitizer_msg}",
                             pacifier_message=""
                         )
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="这个问题我需要跟老板确认一下才能答复您，请您稍等，我马上帮您跟进。"
+                    content="这个问题我需要跟老板确认一下才能答复您，请您稍等，我马上帮您跟进。",
+                    metadata=msg.metadata or {},
                 )
 
         initial_messages = self.context.build_messages(
@@ -486,7 +586,8 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
             is_master=is_master,
-            current_user_id=msg.sender_id
+            current_user_id=msg.sender_id,
+            sender_name=msg.metadata.get("sender_name", ""),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -507,7 +608,9 @@ class AgentLoop:
         if True: # Always audit, but pass is_master to the auditor
             from nanobot.agent.sanitizer import SanitizerAgent
             sanitizer = SanitizerAgent(self.provider, self.model)
+            t_aud = time.monotonic()
             audited_content = await sanitizer.audit_output(final_content, is_master=is_master)
+            logger.info("Sanitizer output audit took {:.1f}s", time.monotonic() - t_aud)
             if audited_content != final_content:
                 final_content = audited_content
                 # Rewrite the last assistant message in internal history so it doesn't remember the leaked version
@@ -517,11 +620,29 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
+        # Ensure guest memory file exists for non-master users on first contact.
+        # Fixes: group chat consolidation threshold (memory_window=100) is rarely
+        # reached per-user, so guest memory was never created for group @mentions.
+        if not is_master and msg.sender_id not in ("Unknown", "user"):
+            mem_store = MemoryStore(self.workspace)
+            guest_file = mem_store._get_guest_file(msg.sender_id)
+            if not guest_file.exists():
+                from datetime import datetime as _dt
+                sender_name = msg.metadata.get("sender_name", "")
+                initial = (
+                    f"---\nTrustScore: 50\n---\n"
+                    f"## Guest: {sender_name} ({msg.sender_id})\n\n"
+                    f"- 首次互动: {_dt.now().strftime('%Y-%m-%d %H:%M')}\n"
+                    f"- 来源: {msg.channel}\n"
+                )
+                mem_store.write_guest(msg.sender_id, initial)
+                logger.info("Created initial guest memory for {} ({})", sender_name, msg.sender_id)
+
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.success("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},

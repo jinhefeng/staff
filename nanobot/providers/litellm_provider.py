@@ -12,6 +12,7 @@ from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
+from loguru import logger
 
 
 # Standard OpenAI chat-completion message keys plus reasoning_content for

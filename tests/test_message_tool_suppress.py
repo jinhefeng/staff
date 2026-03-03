@@ -1,7 +1,7 @@
 """Test message tool suppress logic for final replies."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,11 +19,20 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     return AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10)
 
 
+def _noop_sanitizer(*args, **kwargs):
+    """Create a mock SanitizerAgent that passes everything through."""
+    mock = MagicMock()
+    mock.sanitize_input = AsyncMock(side_effect=lambda content, **kw: ("SAFE", content))
+    mock.audit_output = AsyncMock(side_effect=lambda content, **kw: content)
+    return mock
+
+
 class TestMessageToolSuppressLogic:
     """Final reply suppressed only when message tool sends to the same target."""
 
     @pytest.mark.asyncio
-    async def test_suppress_when_sent_to_same_target(self, tmp_path: Path) -> None:
+    @patch("nanobot.agent.sanitizer.SanitizerAgent", side_effect=_noop_sanitizer)
+    async def test_suppress_when_sent_to_same_target(self, _mock_san, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(
             id="call1", name="message",
@@ -48,7 +57,8 @@ class TestMessageToolSuppressLogic:
         assert result is None  # suppressed
 
     @pytest.mark.asyncio
-    async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
+    @patch("nanobot.agent.sanitizer.SanitizerAgent", side_effect=_noop_sanitizer)
+    async def test_not_suppress_when_sent_to_different_target(self, _mock_san, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(
             id="call1", name="message",
@@ -75,7 +85,8 @@ class TestMessageToolSuppressLogic:
         assert result.channel == "feishu"
 
     @pytest.mark.asyncio
-    async def test_not_suppress_when_no_message_tool_used(self, tmp_path: Path) -> None:
+    @patch("nanobot.agent.sanitizer.SanitizerAgent", side_effect=_noop_sanitizer)
+    async def test_not_suppress_when_no_message_tool_used(self, _mock_san, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="Hello!", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])

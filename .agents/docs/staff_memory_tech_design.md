@@ -34,7 +34,11 @@ Guest 输入
 | 文件 | 路径 | 访问权限 |
 |------|------|----------|
 | 全域主脑 | `memory/core/global.md` | Master 读写；Guest 只读 |
+| 动态群组缓存 | `memory/core/groups.json` | 增量群名 ID 映射，跨会话读取 |
 | 客体专域 | `memory/guests/{user_id}.md` | 仅对应 Guest + Master 可访问 |
+
+**客体联系人别名提取 (Phase 25)**
+客体专域不仅用于隔离与信誉模型，还作为本地联系人搜索的降级数据源：通过将外号等信息记录为 `Alias: xxx`，SearchContactsTool 工具将会自动扫描并命中真实 `user_id`，以辅助无法按名字搜索的钉钉接口。
 
 ### 2.2 YAML Frontmatter 信誉模型
 每个 Guest 文件头部包含量化的社会模型参数：
@@ -47,6 +51,7 @@ trust_score: 50
 
 ### 2.3 核心类 `MemoryStore` (`agent/memory.py`)
 - `read_global()` / `write_global()` — 全域记忆读写
+- `load_groups()` / `save_group_info()` — 动态群组信息缓存读写 (Phase 25)
 - `read_guest(user_id)` / `write_guest(user_id, content)` — 客体记忆读写（含 YAML 解析）
 - `get_memory_context(is_master, current_user_id)` — Master 获取全集；Guest 获取 global + 本人专域
 - `consolidate(session, provider, model, is_master, current_user_id)` — 记忆巩固，分别写入 guest/global
