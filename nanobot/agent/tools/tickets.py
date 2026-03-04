@@ -1,6 +1,7 @@
 """Tools for escalating issues to the Master via async tickets."""
 
 from typing import Any
+from pathlib import Path
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tickets import TicketManager
 from nanobot.bus.events import OutboundMessage
@@ -85,17 +86,20 @@ class EscalateToMasterTool(Tool):
         return f"Ticket {ticket_id} created and forwarded to Master. Please use `{pacifier_message}` as your final output to the user."
 
 class ResolveTicketTool(Tool):
-    """Tool for the Master to resolve a pending async ticket."""
+    """Tool for the Master to resolve or approve a pending async ticket."""
 
     name = "resolve_ticket"
     description = (
         "Use this tool when you (acting on behalf of the Master) want to answer a pending ticket "
-        "and send a message back to the guest who asked the question."
+        "and send a message back to the guest who asked the question. "
+        "For DEFERRED TASK tickets (工单内容以'[DEFERRED TASK]'开头), this will APPROVE the task "
+        "and add it to the HEARTBEAT.md execution queue instead of directly resolving it."
     )
 
-    def __init__(self, ticket_manager: TicketManager, send_callback: Any):
+    def __init__(self, ticket_manager: TicketManager, send_callback: Any, workspace: Path):
         self.ticket_manager = ticket_manager
         self.send_callback = send_callback
+        self.workspace = workspace
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -115,16 +119,55 @@ class ResolveTicketTool(Tool):
         }
 
     async def execute(self, ticket_id: str, message_to_guest: str) -> str:
-        ticket = self.ticket_manager.resolve_ticket(ticket_id)
+        # Check if ticket exists first
+        ticket = self.ticket_manager.tickets.get(ticket_id)
         if not ticket:
             return f"Error: Ticket {ticket_id} not found or already resolved."
 
-        # Forward the message back to the guest asynchronously.
-        # Use guest_id as chat_id to ensure the reply goes to their private chat instead of the original group.
+        content = ticket.get("content", "")
+
+        # --- Branch: DEFERRED TASK → approve + write to HEARTBEAT ---
+        if content.startswith("[DEFERRED TASK]"):
+            task_desc = content.replace("[DEFERRED TASK] ", "", 1)
+            approved = self.ticket_manager.approve_ticket(ticket_id)
+            if not approved:
+                return f"Error: Could not approve ticket {ticket_id}."
+
+            # Write to HEARTBEAT.md so HeartbeatService picks it up
+            heartbeat_file = self.workspace / "HEARTBEAT.md"
+            try:
+                with open(heartbeat_file, "a", encoding="utf-8") as f:
+                    f.write(f"\n- [ ] [TICKET {ticket_id}] {task_desc}\n")
+                logger.info("Approved deferred task {} and appended to HEARTBEAT.md", ticket_id)
+            except Exception as e:
+                logger.error("Failed to append deferred task to HEARTBEAT.md: {}", e)
+
+            # Notify the requester
+            guest_id = ticket.get("guest_id", "")
+            guest_channel = ticket.get("guest_channel", "")
+            if guest_id and guest_channel and message_to_guest:
+                asyncio.create_task(
+                    self.send_callback(OutboundMessage(
+                        channel=guest_channel,
+                        chat_id=guest_id,
+                        content=message_to_guest
+                    ))
+                )
+
+            return (
+                f"Deferred task {ticket_id} approved by Master and added to HEARTBEAT.md execution queue. "
+                f"The HeartbeatService will execute it in the next cycle."
+            )
+
+        # --- Branch: Normal escalation ticket → resolve + reply ---
+        resolved = self.ticket_manager.resolve_ticket(ticket_id)
+        if not resolved:
+            return f"Error: Ticket {ticket_id} not found or already resolved."
+
         asyncio.create_task(
             self.send_callback(OutboundMessage(
-                channel=ticket["guest_channel"],
-                chat_id=ticket["guest_id"],
+                channel=resolved["guest_channel"],
+                chat_id=resolved["guest_id"],
                 content=message_to_guest
             ))
         )

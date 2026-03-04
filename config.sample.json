@@ -1,6 +1,7 @@
 {
   "agents": {
     "defaults": {
+      "name": "nanobot",
       "workspace": "./workspace",
       "provider": "nvidia",
       "maxTokens": 8192,

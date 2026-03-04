@@ -1,22 +1,35 @@
+"""Tool for deferring tasks to the background with Master approval."""
+
 from typing import Any
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tickets import TicketManager
+from nanobot.bus.events import OutboundMessage
 from loguru import logger
 import asyncio
 
+
 class DeferTaskTool(Tool):
-    """Tool to officially defer a task to the background and log it as a ticket."""
+    """Tool to officially defer a task to the background via Master-approved ticket.
+
+    Flow:
+    1. Creates a ticket in active_tickets.json (status=pending)
+    2. Notifies Master via their configured channels
+    3. Master approves → ticket moves to HEARTBEAT.md for execution
+    """
 
     name = "defer_to_background"
     description = (
         "CRITICAL ANTI-LIP-SERVICE TOOL. Use this tool IMMEDIATELY ANY TIME you tell the user you will "
         "'fix a skill later', 'look for an alternative', 'research something', or do ANY asynchronous background work. "
         "DO NOT just promise to do it in text. You MUST use this tool to officially log the promise as a background task. "
-        "This tool creates a tracked background ticket to ensure you don't forget."
+        "This tool creates a tracked ticket that is sent to Master for approval. "
+        "Only after Master approves will the task enter the execution queue."
     )
 
-    def __init__(self, ticket_manager: TicketManager):
+    def __init__(self, ticket_manager: TicketManager, send_callback: Any, master_channels: list[tuple[str, str]]):
         self.ticket_manager = ticket_manager
+        self.send_callback = send_callback
+        self.master_channels = master_channels
         self._current_guest_channel = ""
         self._current_guest_chat_id = ""
         self._current_guest_id = ""
@@ -54,5 +67,25 @@ class DeferTaskTool(Tool):
             content=f"[DEFERRED TASK] {task_description}",
             guest_name=self._current_guest_name,
         )
-        logger.info(f"Task deferred as ticket {ticket_id} for user {guest_display}")
-        return f"System logged the deferred task as Ticket {ticket_id}. Feel free to output the following message to the user: {reply_to_user}"
+        logger.info("Deferred task ticket {} created for user {}", ticket_id, guest_display)
+
+        # Notify Master for approval
+        notify_msg = (
+            f"🔧 **【延期任务申请】 {ticket_id}**\n\n"
+            f"来自: {guest_display}\n"
+            f"任务: {task_description}\n\n"
+            f"*请回复包含工单号以批准此任务进入执行队列。*"
+        )
+        for ch, ch_id in self.master_channels:
+            logger.info("Notifying Master {}/{} about deferred task {}", ch, ch_id, ticket_id)
+            asyncio.create_task(
+                self.send_callback(OutboundMessage(
+                    channel=ch, chat_id=ch_id, content=notify_msg
+                ))
+            )
+
+        return (
+            f"Deferred task registered as Ticket {ticket_id} and sent to Master for approval. "
+            f"The task will enter the execution queue only after Master approves. "
+            f"Output to user: {reply_to_user}"
+        )

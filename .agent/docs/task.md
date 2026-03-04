@@ -1,0 +1,13 @@
+- [x] 1. 方案定义阶段 (Definition Phase)
+  - [x] 1.1 根因分析：为何 Staff 承诺换数据源却不行动？
+  - [x] 1.2 编写《实施计划》(implementation_plan.md) 详细方案
+  - [x] 1.3 **[Blocker]** 向 Master 发起阻断式确认 (LGTM) -> 已获得授权
+- [x] 2. 影响分析阶段 (Impact Analysis)
+  - [x] 2.1 扫描 `context.py` 的 prompt 上下游影响
+  - [x] 2.2 扫描 `AGENTS.md` (规则冲突及冗余检查)
+- [x] 3. 同步更新与开发阶段 (Sync Phase)
+  - [x] 3.1 强化 `AGENTS.md`：增加强制建单及记录 `HEARTBEAT` 的规范红线
+  - [x] 3.2 引入 `loop.py` 承诺审计器：编写 `check_promise_intent` 内部 LLM 调用
+  - [x] 3.3 拦截与兜底：如果模型被判定为“嘴炮”，在代码层强制向 `HEARTBEAT.md` 追加该任务，并向回复添加系统尾缀。
+  - [x] 3.4 优化 `context.py`：提升 **BACKGROUND TASKING** 的约束力
+  - [ ] 3.5 测试验证：通过终端或钉钉模拟一次“技能失效”场景，验证防敷衍拦截器是否生效。

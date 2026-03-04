@@ -154,11 +154,16 @@ class AgentLoop:
             
         self.tools.register(ResolveTicketTool(
             ticket_manager=self.ticket_manager,
-            send_callback=self.bus.publish_outbound
+            send_callback=self.bus.publish_outbound,
+            workspace=self.workspace,
         ))
         
         from nanobot.agent.tools.defer import DeferTaskTool
-        self.tools.register(DeferTaskTool(ticket_manager=self.ticket_manager))
+        self.tools.register(DeferTaskTool(
+            ticket_manager=self.ticket_manager,
+            send_callback=self.bus.publish_outbound,
+            master_channels=master_channels,
+        ))
 
         # Cross-session chat tools (available when DingTalk is enabled)
         if self.channels_config and hasattr(self.channels_config, "dingtalk"):

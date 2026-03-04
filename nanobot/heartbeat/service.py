@@ -1,8 +1,14 @@
-"""Heartbeat service - periodic agent wake-up to check for tasks."""
+"""Heartbeat service - periodic agent wake-up to check for tasks.
+
+Enhanced with Plan E: after executing deferred tasks, checks whether the
+corresponding tickets were resolved.  If a ticket survives N heartbeat cycles
+without resolution, the service escalates it to the Master.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -10,6 +16,9 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
+    from nanobot.agent.tickets import TicketManager
+
+_MAX_RETRIES = 3  # After this many heartbeat cycles, escalate to Master
 
 _HEARTBEAT_TOOL = [
     {
@@ -48,6 +57,9 @@ class HeartbeatService:
     Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
     ``on_execute`` callback runs the task through the full agent loop and
     returns the result to deliver.
+
+    Phase 3 (retry check): after execution, checks approved deferred tickets.
+    If a ticket is still unresolved after N cycles, escalates to Master.
     """
 
     def __init__(
@@ -57,6 +69,7 @@ class HeartbeatService:
         model: str,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+        ticket_manager: TicketManager | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
     ):
@@ -65,6 +78,7 @@ class HeartbeatService:
         self.model = model
         self.on_execute = on_execute
         self.on_notify = on_notify
+        self.ticket_manager = ticket_manager
         self.interval_s = interval_s
         self.enabled = enabled
         self._running = False
@@ -151,6 +165,8 @@ class HeartbeatService:
 
             if action != "run":
                 logger.info("Heartbeat: OK (nothing to report)")
+                # Even if LLM says skip, still check deferred ticket retries
+                await self._check_deferred_retries()
                 return
 
             logger.info("Heartbeat: tasks found, executing...")
@@ -159,8 +175,61 @@ class HeartbeatService:
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
+
+            # Phase 3: Check deferred ticket retry status
+            await self._check_deferred_retries()
+
         except Exception:
             logger.exception("Heartbeat execution failed")
+
+    async def _check_deferred_retries(self) -> None:
+        """Phase 3 (Plan E): Check approved deferred tickets and bump retry counters.
+
+        If a ticket has been in 'approved' status for more than _MAX_RETRIES
+        heartbeat cycles without being resolved, escalate to Master.
+        """
+        if not self.ticket_manager:
+            return
+
+        approved = self.ticket_manager.get_approved_deferred_tickets()
+        if not approved:
+            return
+
+        for ticket in approved:
+            ticket_id = ticket["ticket_id"]
+            retries = self.ticket_manager.increment_heartbeat_retries(ticket_id)
+            logger.info("Deferred ticket {} retry count: {}/{}", ticket_id, retries, _MAX_RETRIES)
+
+            if retries >= _MAX_RETRIES:
+                task_desc = ticket.get("content", "").replace("[DEFERRED TASK] ", "", 1)
+                escalation_msg = (
+                    f"⚠️ **【延期任务超时】 {ticket_id}**\n\n"
+                    f"任务: {task_desc}\n"
+                    f"已经过 {retries} 个 Heartbeat 周期（约 {retries * self.interval_s // 60} 分钟）仍未完成。\n\n"
+                    f"请确认是否需要人工介入，或回复包含工单号以重置重试次数。"
+                )
+                logger.warning("Deferred ticket {} exceeded max retries, escalating to Master", ticket_id)
+
+                if self.on_notify:
+                    await self.on_notify(escalation_msg)
+
+                # Also clean it from HEARTBEAT.md to avoid repeated execution attempts
+                self._remove_ticket_from_heartbeat(ticket_id)
+
+                # Resolve and archive the failed ticket
+                self.ticket_manager.resolve_ticket(ticket_id)
+
+    def _remove_ticket_from_heartbeat(self, ticket_id: str) -> None:
+        """Remove a specific ticket line from HEARTBEAT.md."""
+        try:
+            content = self.heartbeat_file.read_text(encoding="utf-8")
+            # Match lines like: - [ ] [TICKET TKT-xxx] ... or - [x] [TICKET TKT-xxx] ...
+            pattern = rf"^- \[[ x]\] \[TICKET {re.escape(ticket_id)}\].*$\n?"
+            new_content = re.sub(pattern, "", content, flags=re.MULTILINE)
+            self.heartbeat_file.write_text(new_content, encoding="utf-8")
+            logger.info("Removed ticket {} from HEARTBEAT.md", ticket_id)
+        except Exception:
+            logger.exception("Failed to clean HEARTBEAT.md for ticket {}", ticket_id)
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""

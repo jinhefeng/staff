@@ -99,12 +99,12 @@ def _init_prompt_session() -> None:
     )
 
 
-def _print_agent_response(response: str, render_markdown: bool) -> None:
+def _print_agent_response(response: str, render_markdown: bool, agent_name: str = "nanobot") -> None:
     """Render assistant response with consistent terminal styling."""
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
-    console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+    console.print(f"[cyan]{__logo__} {agent_name}[/cyan]")
     console.print(body)
     console.print()
 
@@ -406,6 +406,7 @@ def gateway(
         model=agent.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
+        ticket_manager=agent.ticket_manager,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
@@ -524,7 +525,7 @@ def agent(
         async def run_once():
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
-            _print_agent_response(response, render_markdown=markdown)
+            _print_agent_response(response, render_markdown=markdown, agent_name=config.agents.defaults.name)
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())
@@ -571,7 +572,7 @@ def agent(
                             turn_done.set()
                         elif msg.content:
                             console.print()
-                            _print_agent_response(msg.content, render_markdown=markdown)
+                            _print_agent_response(msg.content, render_markdown=markdown, agent_name=config.agents.defaults.name)
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:
@@ -607,7 +608,7 @@ def agent(
                             await turn_done.wait()
 
                         if turn_response:
-                            _print_agent_response(turn_response[0], render_markdown=markdown)
+                            _print_agent_response(turn_response[0], render_markdown=markdown, agent_name=config.agents.defaults.name)
                     except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")
@@ -987,6 +988,7 @@ def cron_run(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
+        agent_name=config.agents.defaults.name,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,

@@ -107,6 +107,41 @@ class TicketManager:
             logger.info("Resolved and archived async ticket {}", ticket_id)
         return ticket
 
+    def approve_ticket(self, ticket_id: str) -> Dict[str, Any] | None:
+        """Mark a deferred task ticket as 'approved' by Master.
+        
+        Unlike resolve_ticket, this does NOT archive the ticket.
+        It stays in active_tickets.json with status='approved' so HeartbeatService
+        can pick it up for execution.
+        """
+        ticket = self.tickets.get(ticket_id)
+        if not ticket:
+            return None
+        ticket["status"] = "approved"
+        ticket["approved_at"] = datetime.now().isoformat()
+        ticket["heartbeat_retries"] = 0
+        self._save()
+        logger.info("Master approved deferred ticket {}", ticket_id)
+        return ticket
+
+    def get_approved_deferred_tickets(self) -> List[Dict[str, Any]]:
+        """Returns all deferred task tickets that have been approved but not yet resolved."""
+        result = []
+        for tk, meta in self.tickets.items():
+            if meta.get("status") == "approved" and not meta.get("resolved", False):
+                result.append(meta)
+        return result
+
+    def increment_heartbeat_retries(self, ticket_id: str) -> int:
+        """Increment the heartbeat retry counter for a ticket. Returns new count."""
+        ticket = self.tickets.get(ticket_id)
+        if not ticket:
+            return -1
+        count = ticket.get("heartbeat_retries", 0) + 1
+        ticket["heartbeat_retries"] = count
+        self._save()
+        return count
+
     def get_stalled_tickets(self, timeout_minutes: int = 30) -> List[Dict[str, Any]]:
         """Returns tickets that are older than timeout_minutes and haven't been pacified yet."""
         stalled = []

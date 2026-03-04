@@ -33,14 +33,29 @@ echo ">> 私有配置探测通过。"
 
 echo "[4/4] 环境挂载成功，即将拉起微服务核心..."
 echo "=========================================="
-# 增设防呆预警：检测后台是否已驻留 gateway 进程
+# 安全重启：检测并清理后台残留的 gateway 进程
 EXISTING_PID=$(pgrep -f "python.*nanobot gateway" || true)
 if [ -n "$EXISTING_PID" ]; then
-    echo -e "\033[33m⚠️ 警告：检测到系统中已存在运行中的 nanobot gateway 进程 (PID: $EXISTING_PID)！\033[0m"
-    echo -e "\033[33m   这可能是由于您之前在后台挂起了服务或 IDE 拦截了终止信号。\033[0m"
-    echo -e "\033[33m   强拉新实例可能会导致逻辑混乱。若需清理，请另开窗口执行: \033[1;31mpkill -f \"nanobot gateway\"\033[0m"
-    echo ">> 3秒后将强行继续启动本实例，按下 Ctrl+C 可中止..."
-    sleep 3
+    echo -e "\033[33m⚠️ 检测到残留 gateway 进程 (PID: $EXISTING_PID)，正在清理...\033[0m"
+    pkill -f "python.*nanobot gateway" || true
+    # 循环等待进程完全退出，最多等 10 秒
+    for i in $(seq 1 10); do
+        if ! pgrep -f "python.*nanobot gateway" > /dev/null 2>&1; then
+            echo -e "\033[32m✅ 旧进程已全部清理完毕。\033[0m"
+            break
+        fi
+        # 5 秒后升级为 SIGKILL 强制终止
+        if [ "$i" -eq 5 ]; then
+            echo -e "\033[31m   旧进程未响应 SIGTERM，发送 SIGKILL 强制终止...\033[0m"
+            pkill -9 -f "python.*nanobot gateway" || true
+        fi
+        sleep 1
+    done
+    # 最终兜底检查
+    if pgrep -f "python.*nanobot gateway" > /dev/null 2>&1; then
+        echo -e "\033[31m🚨 [错误] 无法清理残留进程，请手动执行: kill -9 $EXISTING_PID\033[0m"
+        exit 1
+    fi
 fi
 
 # 通过向 nanobot 注入 ENV 指针，将系统加载路径强行锚定在本项目内的 config.json

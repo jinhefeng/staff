@@ -229,6 +229,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    name: str = "nanobot"
 
 
 class AgentsConfig(Base):

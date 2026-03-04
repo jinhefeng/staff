@@ -28,10 +28,9 @@ coverage.xml
 # 注意：如果希望共享通用记忆，可以取消忽略某些目录，
 # 但通常建议将本地记忆和会话隔离。
 .nanobot/
-memory/
-sessions/
+workspace/memory/
+workspace/sessions/
 logs/
-cron/
 *.pen
 *.pen.lock
 
