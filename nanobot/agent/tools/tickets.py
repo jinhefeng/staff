@@ -46,11 +46,11 @@ class EscalateToMasterTool(Tool):
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "用中文简要概括访客的诉求，供老板做决策。【必须】与访客使用的语言保持一致（访客说中文就写中文，说英文就写英文）。",
+                    "description": "【必须使用中文】用中文简要概括访客的诉求，供老板做决策。禁止使用英文。例如：'访客希望确认三年战略规划'。",
                 },
                 "pacifier_message": {
                     "type": "string",
-                    "description": "立即回复给访客的安抚话术，礼貌说明需要跟老板确认。例如：'我已经将您的问题转交，请稍等'。【必须】与访客使用的语言一致。",
+                    "description": "【必须使用中文】立即回复给访客的安抚话术。例如：'我已经帮您登记，正在为您跟进。'",
                 },
             },
             "required": ["summary", "pacifier_message"],
@@ -110,7 +110,7 @@ class ResolveTicketTool(Tool):
                 },
                 "message_to_guest": {
                     "type": "string",
-                    "description": "回复给访客的最终消息，语气得体。【必须】与访客使用的语言一致。"
+                    "description": "【必须使用中文】回复给访客的最终消息，语气得体。"
                 }
             },
             "required": ["ticket_id", "message_to_guest"]

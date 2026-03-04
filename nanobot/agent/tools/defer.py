@@ -47,11 +47,11 @@ class DeferTaskTool(Tool):
             "properties": {
                 "task_description": {
                     "type": "string",
-                    "description": "用中文描述你承诺要在后台完成的具体任务（例如：'修复雅虎财经股票API，寻找新的数据源'）",
+                    "description": "【必须使用中文】用中文描述你承诺要在后台完成的具体任务。禁止使用英文。例如：'修复雅虎财经股票API，寻找新的数据源'。",
                 },
                 "reply_to_user": {
                     "type": "string",
-                    "description": "你现在想对用户说的安抚回复（例如：'我会找新的数据源来更新这个技能'）。【必须】与用户使用的语言一致。",
+                    "description": "【必须使用中文】你现在想对用户说的安抚回复。例如：'我会找新的数据源来更新这个技能'。",
                 },
             },
             "required": ["task_description", "reply_to_user"],
