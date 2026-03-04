@@ -269,7 +269,7 @@ class AgentLoop:
             logger.info("LLM call #{} starting...{}", iteration, " (no tools)" if tools_disabled else "")
             
             if messages:
-                logger.info("▶️ [LLM Input] To Model {}:\n{}", self.model, json.dumps(messages[-1:], ensure_ascii=False, indent=2))
+                logger.debug("▶️ [LLM Input] To Model {}:\n{}", self.model, json.dumps(messages[-1:], ensure_ascii=False, indent=2))
                 
             response = await self.provider.chat(
                 messages=messages,
