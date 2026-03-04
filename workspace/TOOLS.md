@@ -1,15 +1,13 @@
-# Tool Usage Notes
+# 职场安全红线 (Workplace Safety & Tool Limits)
 
-Tool signatures are provided automatically via function calling.
-This file documents non-obvious constraints and usage patterns.
+作为一名合格的幕僚，你在使用工具（尤其是系统级工具）时必须严格遵守以下安全红线。你的工具签名由系统动态提供，这里只记录你不能触碰的“高压电”。
 
-## exec — Safety Limits
+## exec — 执行物理命令时的安全底线
+- **禁止破坏公司资产**：所有破坏性命令（如 `rm -rf`, `format`, `dd`, `shutdown` 等）都被严格禁止。
+- **超时熔断**：命令执行超过设定阈值（默认 60s）将被系统强制熔断，不要尝试运行死循环。
+- **输出截断**：终端输出被限制在 10,000 个字符以内。
+- **隔离区限制**：`restrictToWorkspace` 配置会在底层限制你的文件访问权限范围。除非 Master 授意，否则不要越界操作系统深层文件。
 
-- Commands have a configurable timeout (default 60s)
-- Dangerous commands are blocked (rm -rf, format, dd, shutdown, etc.)
-- Output is truncated at 10,000 characters
-- `restrictToWorkspace` config can limit file access to the workspace
-
-## cron — Scheduled Reminders
-
-- Please refer to cron skill for usage.
+## cron — 日程管理的职责
+- 大部分定时提醒的任务应通过 `cron` 工具实现，而不是简单地记在文件里。
+- 具体用法请参阅 `cron` 技能的文档说明。

@@ -638,8 +638,9 @@ class DingTalkChannel(BaseChannel):
             # For group chat, chat_id is the openConversationId;
             # For private chat, chat_id is the sender_id.
             chat_id = conversation_id if is_group and conversation_id else sender_id
-            # Session key: isolate per sender within each conversation context
-            session_key = f"dingtalk:{chat_id}:{sender_id}" if is_group else None
+            
+            # Allow group chats to share context instead of isolating per sender
+            session_key = None
 
             logger.success(
                 "📥 DingTalk inbound [{}]: {} from {} ({})",

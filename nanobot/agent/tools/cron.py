@@ -26,7 +26,10 @@ class CronTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return (
+            "MANDATORY: You MUST call this tool whenever the user asks you to set a reminder, alarm, "
+            "scheduled task, or a countdown/delayed action. Actions: add, list, remove."
+        )
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -58,6 +61,10 @@ class CronTool(Tool):
                     "type": "string",
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')"
                 },
+                "delay_seconds": {
+                    "type": "integer",
+                    "description": "Delay before execution in seconds (for one-time future tasks like 'in 2 minutes' -> 120)"
+                },
                 "job_id": {
                     "type": "string",
                     "description": "Job ID (for remove)"
@@ -74,11 +81,12 @@ class CronTool(Tool):
         cron_expr: str | None = None,
         tz: str | None = None,
         at: str | None = None,
+        delay_seconds: int | None = None,
         job_id: str | None = None,
         **kwargs: Any
     ) -> str:
         if action == "add":
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, delay_seconds)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -92,6 +100,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        delay_seconds: int | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -112,6 +121,11 @@ class CronTool(Tool):
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
         elif cron_expr:
             schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+        elif delay_seconds:
+            from datetime import datetime, timedelta
+            at_ms = int((datetime.now() + timedelta(seconds=delay_seconds)).timestamp() * 1000)
+            schedule = CronSchedule(kind="at", at_ms=at_ms)
+            delete_after = True
         elif at:
             from datetime import datetime
             dt = datetime.fromisoformat(at)
@@ -119,7 +133,7 @@ class CronTool(Tool):
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
         else:
-            return "Error: either every_seconds, cron_expr, or at is required"
+            return "Error: either every_seconds, cron_expr, delay_seconds, or at is required"
         
         job = self._cron.add_job(
             name=message[:30],

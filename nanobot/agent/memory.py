@@ -104,14 +104,15 @@ class MemoryStore:
 
     def get_memory_context(self, is_master: bool = False, current_user_id: str = "") -> str:
         """Get filtered memory context based on identity.
-        Master sees global. Guest sees global + their own specific guest file.
+        Master sees global + their own specific guest file.
+        Guest sees global + their own specific guest file.
         """
         global_mem = self.read_global()
+        guest_mem = self.read_guest(current_user_id)
         
         if is_master:
-            return f"## Core Memory (Master View - Full Access)\n{global_mem}"
+            return f"## Core Memory (Master View - Full Access)\n{global_mem}\n\n## Master's Private Memory Sandbox (Read-Write)\n{guest_mem}"
             
-        guest_mem = self.read_guest(current_user_id)
         return f"## Core Global Knowledge (Read-Only)\n{global_mem}\n\n## Your Exclusive Memory Sandbox (Read-Write)\n{guest_mem}"
 
     async def consolidate(

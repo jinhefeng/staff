@@ -29,6 +29,7 @@ coverage.xml
 # 但通常建议将本地记忆和会话隔离。
 .nanobot/
 memory/
+sessions/
 logs/
 cron/
 *.pen

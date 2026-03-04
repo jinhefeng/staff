@@ -462,6 +462,7 @@ class AgentLoop:
             is_master = False
             if self.channels_config and getattr(self.channels_config, channel, None):
                 channel_cfg = getattr(self.channels_config, channel)
+                # For system messages, it is usually initiated by cli or single event, so treat as private
                 if hasattr(channel_cfg, "master_ids") and msg.sender_id in channel_cfg.master_ids:
                     is_master = True
 
@@ -481,10 +482,14 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         is_master = False
+        conv_type = msg.metadata.get("conversation_type")
         if self.channels_config and getattr(self.channels_config, msg.channel, None):
             channel_cfg = getattr(self.channels_config, msg.channel)
             if hasattr(channel_cfg, "master_ids") and msg.sender_id in channel_cfg.master_ids:
-                is_master = True
+                # Only grand Master privileges if the message is from a private chat (type "1", or default empty).
+                # In a group chat (type "2"), even the boss is treated as a regular user to prevent context confusion.
+                if conv_type != "2":
+                    is_master = True
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)

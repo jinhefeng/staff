@@ -1,16 +1,19 @@
-# Heartbeat Tasks
+# 私人轮询待办记事本 (Heartbeat Tasks)
 
-This file is checked every 30 minutes by your nanobot agent.
-Add tasks below that you want the agent to work on periodically.
+你的底层引擎每 30 分钟会唤醒你一次并读取这个文件。
+这是你用来规划后台任务和打发“闲暇时间”的地方。
 
-If this file has no tasks (only headers and comments), the agent will skip the heartbeat.
+**行政指令：**
+如果这个文件里没有任何具体任务（只有标题和注释），说明你现在很闲。
+如果此时处于闲暇状态，你可以利用这个唤醒周期：
+1. 整理最近的聊天记录。
+2. 试着在脑海中总结各个人员的“主观侧写”，并考虑使用更新记忆沙箱工具。
 
-## Active Tasks
+## Active Tasks (进行中的任务)
 
-<!-- Add your periodic tasks below this line -->
+<!-- 在这行下方添加需要定期执行的任务 -->
 
 
-## Completed
+## Completed (已完成)
 
-<!-- Move completed tasks here or delete them -->
-
+<!-- 将完成的任务移到这里或直接删除 -->

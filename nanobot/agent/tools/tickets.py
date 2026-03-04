@@ -13,8 +13,8 @@ class EscalateToMasterTool(Tool):
 
     name = "escalate_to_master"
     description = (
-        "Use this tool when you are asked an sensitive, secure, or private question that you "
-        "do not have permission or certainty to answer, OR when a guest asks for the Master. "
+        "Use this tool ONLY when you are asked an sensitive, secure, or private question that you "
+        "do not have permission or certainty to answer, OR when a guest asks for the Master (老板/金总/主人). "
         "This will asynchronously forward the question to the Master for human approval, "
         "and provide an initial placating response to the user."
     )
@@ -46,11 +46,11 @@ class EscalateToMasterTool(Tool):
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "A concise summary of what the guest is asking for so the Master can make a decision.",
+                    "description": "A concise summary of what the guest is asking for so the Master can make a decision. Must be in Chinese.",
                 },
                 "pacifier_message": {
                     "type": "string",
-                    "description": "What to reply directly to the guest right now, politely explaining that you need to check with the boss. E.g., 'I will need to ask the boss about this. I'll get back to you shortly.'",
+                    "description": "What to reply directly to the guest right now, politely explaining that you need to check with the boss. E.g., '我已经将您的问题记录下来并转交给了老板，请稍等。' Must be in Chinese.",
                 },
             },
             "required": ["summary", "pacifier_message"],
@@ -71,7 +71,7 @@ class EscalateToMasterTool(Tool):
         )
 
         # 2. Forward to Master
-        forward_msg = f"🎟️ **TICKET {ticket_id}** (from {guest_display})\n\n{summary}\n\n*Reply mentioning the ticket ID to resolve this.*"
+        forward_msg = f"🎟️ **【工单提醒】 {ticket_id}** (来自 {guest_display})\n\n{summary}\n\n*请回复包含工单号以处理此请求。*"
         
         for ch, ch_id in self.master_channels:
             logger.info("Escalating ticket {} to master {}/{}", ticket_id, ch, ch_id)
@@ -108,7 +108,7 @@ class ResolveTicketTool(Tool):
                 },
                 "message_to_guest": {
                     "type": "string",
-                    "description": "The final message to send back to the guest, written in an appropriate tone."
+                    "description": "The final message to send back to the guest, written in an appropriate tone. Must be in Chinese."
                 }
             },
             "required": ["ticket_id", "message_to_guest"]
@@ -119,11 +119,12 @@ class ResolveTicketTool(Tool):
         if not ticket:
             return f"Error: Ticket {ticket_id} not found or already resolved."
 
-        # Forward the message back to the guest asynchronously
+        # Forward the message back to the guest asynchronously.
+        # Use guest_id as chat_id to ensure the reply goes to their private chat instead of the original group.
         asyncio.create_task(
             self.send_callback(OutboundMessage(
                 channel=ticket["guest_channel"],
-                chat_id=ticket["guest_chat_id"],
+                chat_id=ticket["guest_id"],
                 content=message_to_guest
             ))
         )

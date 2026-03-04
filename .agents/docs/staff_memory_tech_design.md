@@ -28,14 +28,23 @@ Guest 输入
 
 ## 2. 联邦记忆系统 (Phase 19)
 
-### 2.1 物理存储隔离
-抛弃了旧版的单文件 `MEMORY.md` + 正则沙箱方案。记忆文件物理分裂为两类：
+### 2.1 物理存储隔离与加载机制
+抛弃了旧版的单文件 `MEMORY.md` + 正则沙箱方案以及全员挂载 `USER.md` 的耦合方案。
 
-| 文件 | 路径 | 访问权限 |
-|------|------|----------|
-| 全域主脑 | `memory/core/global.md` | Master 读写；Guest 只读 |
+#### A. 记忆文件架构 (Federated Memory)
+
+| 文件类别 | 路径 | 加载 / 读写权限 |
+|----------|------|-----------------|
+| 全域主脑 | `memory/core/global.md` | Master / Guest 皆加载。仅 Master 触发巩固时可写。 |
+| 客体专域 | `memory/guests/{user_id}.md` | 严密物理隔离。**Master 私聊时也加载专属的 `guests/{master_id}.md`** 作为隔离存放主人隐私偏好的收纳箱。 |
 | 动态群组缓存 | `memory/core/groups.json` | 增量群名 ID 映射，跨会话读取 |
-| 客体专域 | `memory/guests/{user_id}.md` | 仅对应 Guest + Master 可访问 |
+
+#### B. Bootstrap 核心潜意识注入 (Core Identity Prompt)
+不再使用 `USER.md` 作为全局强推的主人档案。取而代之的是，系统在启动和每一次请求前，强绑定以下四大基石文件作为“出厂系统潜意识”：
+- `SOUL.md`：核心心智模型（双面人、外交裁剪、群聊权力降级定律）。
+- `AGENTS.md`：岗位职责与操作流（使用 cron 与越权工单的行政规范）。
+- `HEARTBEAT.md`：30 分钟轮询心跳的私人工作簿（指示闲时去做记录整理）。
+- `TOOLS.md`：职场操作安全红线。
 
 **客体联系人别名提取 (Phase 25)**
 客体专域不仅用于隔离与信誉模型，还作为本地联系人搜索的降级数据源：通过将外号等信息记录为 `Alias: xxx`，SearchContactsTool 工具将会自动扫描并命中真实 `user_id`，以辅助无法按名字搜索的钉钉接口。
