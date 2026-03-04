@@ -267,6 +267,10 @@ class AgentLoop:
 
             t0 = time.monotonic()
             logger.info("LLM call #{} starting...{}", iteration, " (no tools)" if tools_disabled else "")
+            
+            if messages:
+                logger.info("▶️ [LLM Input] To Model {}:\n{}", self.model, json.dumps(messages[-1:], ensure_ascii=False, indent=2))
+                
             response = await self.provider.chat(
                 messages=messages,
                 tools=None if tools_disabled else tool_defs,
@@ -277,6 +281,12 @@ class AgentLoop:
             )
             elapsed = time.monotonic() - t0
             logger.info("LLM call #{} returned in {:.1f}s (finish_reason={})", iteration, elapsed, response.finish_reason)
+
+            if response.content:
+                logger.info("◀️ [LLM Output] Content:\n{}", response.content)
+            if response.has_tool_calls:
+                tc_hints = [{"name": t.name, "args": getattr(t, "arguments", {})} for t in response.tool_calls]
+                logger.info("◀️ [LLM Output] Tool Calls:\n{}", json.dumps(tc_hints, ensure_ascii=False, indent=2))
 
             # Auto-fallback: if model doesn't support tools, retry without them
             if (
