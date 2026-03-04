@@ -15,13 +15,48 @@ class TicketManager:
     def __init__(self, workspace: Path):
         self.tickets_dir = ensure_dir(workspace / "memory" / "tickets")
         self.db_file = self.tickets_dir / "active_tickets.json"
+        self.archive_file = self.tickets_dir / "archived_tickets.jsonl"
         self.tickets: Dict[str, Dict[str, Any]] = self._load()
+
+    def _cleanup_stale_tickets(self) -> None:
+        """Archived resolved tickets and tickets older than 7 days to prevent bloat."""
+        now = datetime.now()
+        to_archive = []
+        timeout_delta = timedelta(days=7)
+
+        for tk, meta in list(self.tickets.items()):
+            # Archive if it's explicitly marked as 'resolved' 
+            # (Note: resolve_ticket now pops and archives directly, but we check just in case)
+            if meta.get("resolved", False):
+                to_archive.append(tk)
+                continue
+                
+            # Archive if older than 7 days
+            created_at = datetime.fromisoformat(meta["created_at"])
+            if now - created_at > timeout_delta:
+                meta["archive_reason"] = "timeout (7 days)"
+                to_archive.append(tk)
+
+        if not to_archive:
+            return
+
+        try:
+            with open(self.archive_file, "a", encoding="utf-8") as f:
+                for tk in to_archive:
+                    meta = self.tickets.pop(tk)
+                    meta["archived_at"] = now.isoformat()
+                    f.write(json.dumps(meta, ensure_ascii=False) + "\n")
+            logger.info("Archived {} stale tickets to {}.", len(to_archive), self.archive_file)
+            self._save()
+        except Exception:
+            logger.exception("Failed to clean up stale tickets.")
 
     def _load(self) -> Dict[str, Dict[str, Any]]:
         if self.db_file.exists():
             try:
                 content = self.db_file.read_text(encoding="utf-8")
-                return json.loads(content)
+                loaded = json.loads(content)
+                return loaded
             except Exception:
                 logger.exception("Failed to load tickets db.")
                 return {}
@@ -48,14 +83,28 @@ class TicketManager:
         }
         self._save()
         logger.info("Created async ticket {} for guest {} ({})", ticket_id, guest_name or guest_id, guest_id)
+        
+        # Trigger an asynchronous clean up to prevent memory bloat over time
+        self._cleanup_stale_tickets()
+        
         return ticket_id
 
     def resolve_ticket(self, ticket_id: str) -> Dict[str, Any] | None:
-        """Removes the ticket from active tracking and returns it."""
+        """Removes the ticket from active tracking, archives it and returns it."""
         ticket = self.tickets.pop(ticket_id, None)
         if ticket:
+            ticket["resolved"] = True
+            ticket["resolved_at"] = datetime.now().isoformat()
+            
+            # Write to archive directly upon resolution
+            try:
+                with open(self.archive_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(ticket, ensure_ascii=False) + "\n")
+            except Exception:
+                logger.exception("Failed to write resolved ticket {} to archive.", ticket_id)
+                
             self._save()
-            logger.info("Resolved async ticket {}", ticket_id)
+            logger.info("Resolved and archived async ticket {}", ticket_id)
         return ticket
 
     def get_stalled_tickets(self, timeout_minutes: int = 30) -> List[Dict[str, Any]]:

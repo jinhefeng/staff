@@ -46,11 +46,11 @@ class EscalateToMasterTool(Tool):
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "A concise summary of what the guest is asking for so the Master can make a decision. Must be in Chinese.",
+                    "description": "A concise summary of what the guest is asking for so the Master can make a decision. Adapt the language to match the original guest input (e.g. use English if they spoke English).",
                 },
                 "pacifier_message": {
                     "type": "string",
-                    "description": "What to reply directly to the guest right now, politely explaining that you need to check with the boss. E.g., '我已经将您的问题记录下来并转交给了老板，请稍等。' Must be in Chinese.",
+                    "description": "What to reply directly to the guest right now, politely explaining that you need to check with the boss. E.g., '我已经将您的问题转交，请稍等' or 'I have forwarded your request, please wait'. MUST be in the exact same language the guest used.",
                 },
             },
             "required": ["summary", "pacifier_message"],
@@ -108,7 +108,7 @@ class ResolveTicketTool(Tool):
                 },
                 "message_to_guest": {
                     "type": "string",
-                    "description": "The final message to send back to the guest, written in an appropriate tone. Must be in Chinese."
+                    "description": "The final message to send back to the guest, written in an appropriate tone. Must match the language the guest originally used."
                 }
             },
             "required": ["ticket_id", "message_to_guest"]

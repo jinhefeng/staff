@@ -28,7 +28,9 @@ class CronTool(Tool):
     def description(self) -> str:
         return (
             "MANDATORY: You MUST call this tool whenever the user asks you to set a reminder, alarm, "
-            "scheduled task, or a countdown/delayed action. Actions: add, list, remove."
+            "scheduled task, or a countdown/delayed action. Actions: add, list, remove.\n"
+            "CRITICAL RULE: Never just verbally agree to remind the user. You MUST call this tool "
+            "first to create a physical reminder before confirming to the user."
         )
     
     @property

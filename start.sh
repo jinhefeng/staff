@@ -33,11 +33,18 @@ echo ">> 私有配置探测通过。"
 
 echo "[4/4] 环境挂载成功，即将拉起微服务核心..."
 echo "=========================================="
+# 增设防呆预警：检测后台是否已驻留 gateway 进程
+EXISTING_PID=$(pgrep -f "python.*nanobot gateway" || true)
+if [ -n "$EXISTING_PID" ]; then
+    echo -e "\033[33m⚠️ 警告：检测到系统中已存在运行中的 nanobot gateway 进程 (PID: $EXISTING_PID)！\033[0m"
+    echo -e "\033[33m   这可能是由于您之前在后台挂起了服务或 IDE 拦截了终止信号。\033[0m"
+    echo -e "\033[33m   强拉新实例可能会导致逻辑混乱。若需清理，请另开窗口执行: \033[1;31mpkill -f \"nanobot gateway\"\033[0m"
+    echo ">> 3秒后将强行继续启动本实例，按下 Ctrl+C 可中止..."
+    sleep 3
+fi
+
 # 通过向 nanobot 注入 ENV 指针，将系统加载路径强行锚定在本项目内的 config.json
 export NANOBOT_CONFIG_PATH="$CONFIG_FILE"
-
-# 【混合架构桥梁】将本地运行环境的网关指向本机的 Docker Gewechat 容器
-export GEWE_BASE_URL="http://127.0.0.1:2531"
 
 # 剥离杂项守护，使用本隔离境拉起
 python -m nanobot gateway

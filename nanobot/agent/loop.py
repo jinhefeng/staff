@@ -459,17 +459,17 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
             
-            is_master = False
+            is_master_identity = False
             if self.channels_config and getattr(self.channels_config, channel, None):
                 channel_cfg = getattr(self.channels_config, channel)
                 # For system messages, it is usually initiated by cli or single event, so treat as private
                 if hasattr(channel_cfg, "master_ids") and msg.sender_id in channel_cfg.master_ids:
-                    is_master = True
+                    is_master_identity = True
 
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
-                is_master=is_master,
+                is_master=is_master_identity,
                 current_user_id=msg.sender_id
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
@@ -481,15 +481,15 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        is_master = False
+        is_master_identity = False
         conv_type = msg.metadata.get("conversation_type")
         if self.channels_config and getattr(self.channels_config, msg.channel, None):
             channel_cfg = getattr(self.channels_config, msg.channel)
             if hasattr(channel_cfg, "master_ids") and msg.sender_id in channel_cfg.master_ids:
-                # Only grand Master privileges if the message is from a private chat (type "1", or default empty).
-                # In a group chat (type "2"), even the boss is treated as a regular user to prevent context confusion.
-                if conv_type != "2":
-                    is_master = True
+                is_master_identity = True
+                
+        # Context privilege: Master only gets global RW and unrestricted context in private chats 
+        is_master_context = is_master_identity and conv_type != "2"
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -511,7 +511,7 @@ class AgentLoop:
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, current_user_id=msg.sender_id, is_master=is_master, archive_all=True):
+                        if not await self._consolidate_memory(temp, current_user_id=msg.sender_id, is_master=is_master_context, archive_all=True):
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
@@ -542,7 +542,7 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session, current_user_id=msg.sender_id, is_master=is_master)
+                        await self._consolidate_memory(session, current_user_id=msg.sender_id, is_master=is_master_context, is_master_identity=is_master_identity)
                 finally:
                     self._consolidating.discard(session.key)
                     _task = asyncio.current_task()
@@ -564,17 +564,16 @@ class AgentLoop:
 
         if cross_chat_tool := self.tools.get("send_cross_chat"):
             if isinstance(cross_chat_tool, SendCrossChatTool):
-                cross_chat_tool.set_context(sender_id=msg.sender_id, is_master=is_master)
+                # Identity grants cross-chat permissions regardless of group context
+                cross_chat_tool.set_context(sender_id=msg.sender_id, is_master=is_master_identity)
 
         history = session.get_history(max_messages=self.memory_window)
         
-        # is_master is already calculated above
-        
-        if not is_master:
+        if not is_master_identity:
             from nanobot.agent.sanitizer import SanitizerAgent
             sanitizer = SanitizerAgent(self.provider, self.model)
             t_san = time.monotonic()
-            verdict, sanitizer_msg = await sanitizer.sanitize_input(msg.content, is_master=is_master)
+            verdict, sanitizer_msg = await sanitizer.sanitize_input(msg.content, is_master=is_master_identity)
             logger.info("Sanitizer input check took {:.1f}s → {}", time.monotonic() - t_san, verdict)
             if verdict == "BLOCK":
                 logger.warning("Input BLOCKED for {}: {}", msg.sender_id, sanitizer_msg)
@@ -600,7 +599,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
-            is_master=is_master,
+            is_master=is_master_context,
             current_user_id=msg.sender_id,
             sender_name=msg.metadata.get("sender_name", ""),
         )
@@ -620,11 +619,11 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        if True: # Always audit, but pass is_master to the auditor
+        if True: # Always audit, but pass identity to the auditor to bypass blocks
             from nanobot.agent.sanitizer import SanitizerAgent
             sanitizer = SanitizerAgent(self.provider, self.model)
             t_aud = time.monotonic()
-            audited_content = await sanitizer.audit_output(final_content, is_master=is_master)
+            audited_content = await sanitizer.audit_output(final_content, is_master=is_master_identity)
             logger.info("Sanitizer output audit took {:.1f}s", time.monotonic() - t_aud)
             if audited_content != final_content:
                 final_content = audited_content
@@ -638,7 +637,7 @@ class AgentLoop:
         # Ensure guest memory file exists for non-master users on first contact.
         # Fixes: group chat consolidation threshold (memory_window=100) is rarely
         # reached per-user, so guest memory was never created for group @mentions.
-        if not is_master and msg.sender_id not in ("Unknown", "user"):
+        if not is_master_identity and msg.sender_id not in ("Unknown", "user"):
             mem_store = MemoryStore(self.workspace)
             guest_file = mem_store._get_guest_file(msg.sender_id)
             if not guest_file.exists():
@@ -687,7 +686,7 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, current_user_id: str = "Unknown", is_master: bool = False, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(self, session, current_user_id: str = "Unknown", is_master: bool = False, is_master_identity: bool = False, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         success = await MemoryStore(self.workspace).consolidate(
             session, self.provider, self.model,
@@ -696,7 +695,7 @@ class AgentLoop:
             is_master=is_master
         )
 
-        if success and not is_master and current_user_id != "Unknown" and current_user_id != "user":
+        if success and not is_master_identity and current_user_id != "Unknown" and current_user_id != "user":
             async def _background_reflect():
                 try:
                     from nanobot.agent.reflection import ReflectionAgent

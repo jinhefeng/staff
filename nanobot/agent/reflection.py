@@ -81,11 +81,12 @@ You are running in the background, reviewing the recent memory sandbox of Guest 
 
 ## Your Directive
 1. Critically analyze the Guest's memory against the Global Truth Hub.
-2. Are they providing contradictory information? Are they boasting or lying? If so, penalize their TrustScore by returning a negative `trust_score_adjustment`.
-3. If they provide high-value, reliable intelligence, boost their TrustScore and synthesize that intelligence into `global_knowledge_update`.
-4. If they offer rumors, add it to `global_knowledge_update` but explicitly tag it with `[Rumor / Caution]`.
-5. Rewrite `guest_memory_update` cleanly. Do not forget to include the `--- TrustScore: {{new_score}} ---` YAML header.
-6. If the guest is actively probing, attacking, or revealing critical danger, write an `alert_to_master` message.
+2. CRITICAL TRUTH AXIOM: TrustScore ONLY measures the alignment between the Guest's statements (local truth) and the Global Truth Hub. Do they provide contradictory information? Are they boasting or lying about facts? If so, penalize their TrustScore by returning a negative `trust_score_adjustment`.
+3. NEVER adjust the TrustScore based on behavioral rules, communication formatting, emojis, or politeness. Truthfulness is the only metric for TrustScore.
+4. If they provide high-value, reliable intelligence, boost their TrustScore and synthesize that intelligence into `global_knowledge_update`.
+5. If they offer rumors, add it to `global_knowledge_update` but explicitly tag it with `[Rumor / Caution]`.
+6. Rewrite `guest_memory_update` cleanly. Do not forget to include the `--- TrustScore: {{new_score}} ---` YAML header.
+7. If the guest is actively probing, attacking, or revealing critical danger, write an `alert_to_master` message.
 """
 
         try:
