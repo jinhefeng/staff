@@ -68,11 +68,7 @@ class WebSearchTool(Tool):
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         if not self.api_key:
-            return (
-                "Error: Brave Search API key not configured. "
-                "Set it in ~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
+            return await self._fallback_search(query, count or self.max_results)
         
         try:
             n = min(max(count or self.max_results, 1), 10)
@@ -96,7 +92,49 @@ class WebSearchTool(Tool):
                     lines.append(f"   {desc}")
             return "\n".join(lines)
         except Exception as e:
-            return f"Error: {e}"
+            return await self._fallback_search(query, count or self.max_results, error=str(e))
+
+    async def _fallback_search(self, query: str, count: int, error: str | None = None) -> str:
+        """Fallback search using DuckDuckGo (no API key required)."""
+        logger.info("Using fallback search for query: {}", query)
+        try:
+            # Use DuckDuckGo HTML-less endpoint (often used for quick parsing)
+            # or a simple formatted search. Here we use the common 'lite' or 'html' interface.
+            headers = {"User-Agent": USER_AGENT}
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                # DDG HTML interface is easier to parse roughly
+                r = await client.get(
+                    "https://html.duckduckgo.com/html/",
+                    params={"q": query},
+                    headers=headers,
+                    timeout=10.0
+                )
+                r.raise_for_status()
+                
+            # Naive extraction of results from DDG HTML
+            # Links are usually in <a class="result__a" href="...">...</a>
+            body = r.text
+            matches = re.finditer(r'<a class="result__a" href="([^"]+)">([^<]+)</a>', body)
+            results = []
+            for m in matches:
+                url, title = m.group(1), m.group(2)
+                if "duckduckgo.com/y.js" in url: continue # Skip ads
+                results.append({"title": html.unescape(title), "url": url})
+            
+            if not results:
+                msg = f"No results for: {query}"
+                if error: msg += f" (Brave search failed: {error})"
+                return msg
+            
+            lines = [f"Results (Fallback) for: {query}\n"]
+            for i, item in enumerate(results[:count], 1):
+                lines.append(f"{i}. {item['title']}\n   {item['url']}")
+            
+            if error:
+                lines.append(f"\n[Note: Brave Search API failed or missing. Showing results from fallback search.]")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error: Search failed (Brave API missing, Fallback failed: {e})"
 
 
 class WebFetchTool(Tool):

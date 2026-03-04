@@ -407,6 +407,7 @@ def gateway(
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
         ticket_manager=agent.ticket_manager,
+        session_manager=session_manager,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )

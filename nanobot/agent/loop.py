@@ -237,20 +237,23 @@ class AgentLoop:
         from types import SimpleNamespace
         
         calls = []
-        # Capture everything between <tool_call> and </tool_call>, then extract the outermost JSON object
+        decoder = json.JSONDecoder()
+        # Capture everything between <tool_call> and </tool_call>
         matches = re.finditer(r"<tool_call>\s*([\s\S]*?)\s*</tool_call>", text)
         for i, m in enumerate(matches):
             try:
                 raw = m.group(1).strip()
-                # Find the outermost JSON object boundaries
+                # Find the first opening brace
                 start = raw.find("{")
-                end = raw.rfind("}")
-                if start == -1 or end == -1 or end <= start:
+                if start == -1:
                     continue
-                json_str = raw[start:end + 1]
-                data = json.loads(json_str)
+                
+                # Use raw_decode to intelligently find the end of the JSON object
+                # and ignore trailing whitespace or tags.
+                json_str = raw[start:]
+                data, _ = decoder.raw_decode(json_str)
+                
                 if "name" in data:
-                    # Map to a structure similar to LiteLLM's tool call object
                     calls.append(SimpleNamespace(
                         id=f"ext-{i}",
                         name=data["name"],
@@ -331,11 +334,16 @@ class AgentLoop:
                         response.tool_calls = extracted
                     else:
                         response.tool_calls.extend(extracted)
-                # ALWAYS strip tool_call tags from content, even if extraction failed.
-                # Raw XML must never be sent to the end user.
-                response.content = re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", response.content).strip()
-                if not response.content:
-                    response.content = None
+                    
+                    # ONLY strip tags if we actually extracted something.
+                    # This prevents code "disappearing" on parse failure.
+                    response.content = re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", response.content).strip()
+                    if not response.content:
+                        response.content = None
+                else:
+                    # If extraction failed but tags are present, keeping the content 
+                    # allows the SOP retry logic or the user to see what went wrong.
+                    logger.info("Retaining <tool_call> tags in content due to extraction failure")
 
             if response.has_tool_calls:
                 if on_progress:
@@ -370,13 +378,26 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                clean = self._strip_think(response.content)
-                # Don't persist error responses to session history — they can
-                # poison the context and cause permanent 400 loops (#1303).
-                if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
-                    break
+                # SOP Override: If content is too short/denial and no tools were used, 
+                # force the model to explain properly as per AGENTS.md Section 5.
+                denial_keywords = ["查不了", "无法查询", "没有工具", "无权", "不编造"]
+                if (
+                    clean and len(clean) < 20 
+                    and any(kw in clean for kw in denial_keywords)
+                    and not tools_used
+                    and iteration < self.max_iterations
+                ):
+                    logger.warning("Detected terse denial '{}'. Forcing SOP-compliant explanation.", clean)
+                    messages.append({
+                        "role": "user", 
+                        "content": (
+                            "注意：根据《AGENTS SOP》第 5 条‘坦诚无能’原则，"
+                            "如果因为工具缺失或配置问题无法完成任务，请诚实、平实地用人类大白话向用户详细汇报物理工具的缺失原因，"
+                            "禁止使用极简短句或傲慢的比喻。请重新生成您的回复。"
+                        )
+                    })
+                    continue
+
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,

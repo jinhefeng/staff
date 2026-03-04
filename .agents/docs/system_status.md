@@ -1,6 +1,6 @@
 # Staff 系统状态总览 (System Status Overview)
 
-> **最后更新**: 2026-03-03 02:38 CST  
+> **最后更新**: 2026-03-05 00:06 CST  
 > **当前版本**: nanobot-ai 0.1.4.post2 (上游最新 0.1.4.post3)  
 > **运行环境**: macOS / Python 3.11 / venv 隔离
 
@@ -82,7 +82,8 @@
       "enabled": true,
       "clientId": "dingXXXXXXXX",
       "clientSecret": "xxxxxxxx",
-      "masterIds": ["014224562537153949"]
+      "masterIds": ["014224562537153949"],
+      "memoryWindow": 30
     }
   }
 }
@@ -96,28 +97,54 @@
 staff/
 ├── .agent/
 │   ├── docs/                    # 项目文档（本文件）
-│   │   ├── system_status.md     # 系统总览
+├── .agent/                      # 机器人指令集与文档
+│   ├── docs/                    # 项目技术文档
+│   │   ├── system_status.md     # [Current] 系统总览与架构
 │   │   ├── staff_memory_philosophy.md  # 记忆哲学
-│   │   ├── staff_memory_tech_design.md # 记忆技术设计
-│   │   └── dingtalk_deploy_guide.md    # 钉钉部署指南
-│   ├── rules/                   # 项目规则
-│   └── workflows/               # 工作流定义
-├── nanobot/                     # 核心引擎（基于 HKUDS/nanobot 二次开发）
-│   ├── agent/                   # Agent 核心
-│   │   ├── loop.py              # 主循环 + 身份路由
-│   │   ├── context.py           # 上下文构建器
-│   │   ├── memory.py            # 联邦记忆系统
-│   │   ├── sanitizer.py         # 安审防火墙
-│   │   ├── reflection.py        # 潜意识反思
-│   │   └── tickets.py           # 异步工单
-│   ├── channels/
-│   │   └── dingtalk.py          # 钉钉通道
-│   ├── config/
-│   │   └── schema.py            # 配置 Schema
-│   └── templates/
-│       └── SOUL.md              # 人格灵魂 Prompt
-├── config.json                  # 本地配置（.gitignore）
-├── pyproject.toml               # Python 包定义
-├── install.sh                   # 环境安装
-└── start.sh                     # 启动脚本
+│   │   └── ...                  # 其他部署/技术设计文档
+│   ├── rules/                   # 项目规则 (代码风格/任务管理)
+│   └── workflows/               # 工作流定义 (restore-context 等)
+├── workspace/                   # 核心运行数据与配置 (R/W)
+│   ├── AGENTS.md                # 代理角色定义与行为手册
+│   ├── SOUL.md                  # 人格灵魂与核心 Prompt
+│   ├── TOOLS.md                 # 提示词层面的工具描述
+│   ├── HEARTBEAT.md             # 心跳任务指令
+│   ├── memory/                  # 联邦记忆体系
+│   │   ├── core/
+│   │   │   ├── global.md        # 全局长期知识 (Master 模式写入)
+│   │   │   └── groups.json      # 已识别的群组 ID/标题映射
+│   │   ├── guests/              # 访客/用户私有记忆沙盒目录
+│   │   └── HISTORY.md           # 归档的历史摘要 (可搜索)
+│   ├── sessions/                # 会话上下文持久化记录
+│   ├── tickets/                 # 异步工单与任务状态数据
+│   └── skills/                  # 用户定义的技能 SKILL.md 存放地
+├── nanobot/                     # 核心引擎 (基于 HKUDS/nanobot)
+│   ├── agent/                   # Agent 逻辑层
+│   │   ├── loop.py              # 核心主循环与身份判定
+│   │   ├── context.py           # 上下文拼装路径逻辑
+│   │   ├── memory.py            # 记忆归档与联邦同步逻辑
+│   │   ├── reflection.py        # 潜意识反思与信任推演
+│   │   ├── sanitizer.py         # 输入/输出安审防火墙
+│   │   ├── subagent.py          # 子代理管理逻辑
+│   │   ├── tickets.py           # 工单状态机管理
+│   │   └── tools/               # 核心工具箱
+│   │       ├── filesystem.py    # 文件读写改查 (工具)
+│   │       ├── memory.py        # memorize_fact (工具)
+│   │       ├── tickets.py       # 升级/解决工单 (工具)
+│   │       ├── defer.py         # 任务后台延迟执行 (工具)
+│   │       └── ...              # cron/shell/web/spawn 等工具
+│   ├── bus/                     # 内部消息总线 (Events/Queue)
+│   ├── channels/                # 通信通道 (DingTalk/CLI)
+│   ├── config/                  # 配置加载与 Schema 校验
+│   ├── providers/               # LLM 供应商封装 (Litellm/Nvidia/Gemini)
+│   ├── session/                 # 会话内存管理
+│   ├── skills/                  # 系统级预置技能
+│   ├── templates/               # Prompt 初始模板
+│   └── utils/                   # 辅助函数库
+├── config.json                  # 运行配置 (包含 API Keys/masterIds)
+├── pyproject.toml               # Python 项目依赖管理
+├── install.sh                   # 一键环境初始化脚本
+└── start.sh                     # 服务启动与热重启脚本
 ```
+
+> **实时性说明**: 该布局图反映了系统当前的物理结构，若有新模块添加或文件删除，此文档应同步更新。

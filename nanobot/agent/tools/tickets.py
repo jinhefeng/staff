@@ -46,7 +46,7 @@ class EscalateToMasterTool(Tool):
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "【必须使用中文】用中文简要概括访客的诉求，供老板做决策。禁止使用英文。例如：'访客希望确认三年战略规划'。",
+                    "description": "【必须仅使用中文】请务必用中文简短描述访客诉求，严禁使用任何英文。例如：'访客想要看三年规划'。",
                 },
                 "pacifier_message": {
                     "type": "string",

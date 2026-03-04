@@ -47,7 +47,7 @@ class DeferTaskTool(Tool):
             "properties": {
                 "task_description": {
                     "type": "string",
-                    "description": "【必须使用中文】用中文描述你承诺要在后台完成的具体任务。禁止使用英文。例如：'修复雅虎财经股票API，寻找新的数据源'。",
+                    "description": "【必须仅使用中文】请务必用中文简短描述后台任务，严禁使用任何英文。例如：'重定义数据库索引'。",
                 },
                 "reply_to_user": {
                     "type": "string",

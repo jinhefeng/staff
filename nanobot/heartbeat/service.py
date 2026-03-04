@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
+from datetime import datetime, timedelta
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -32,12 +33,16 @@ _HEARTBEAT_TOOL = [
                     "action": {
                         "type": "string",
                         "enum": ["skip", "run"],
-                        "description": "skip = nothing to do, run = has active tasks",
+                        "description": "skip = nothing to do, run = process ONE active task",
                     },
-                    "tasks": {
+                    "task": {
                         "type": "string",
-                        "description": "Natural-language summary of active tasks (required for run)",
+                        "description": "The description of the FIRST pending task (marked with [ ]). DO NOT summarize multiple tasks.",
                     },
+                    "is_subconscious": {
+                        "type": "boolean",
+                        "description": "Set to true if this is for the subconscious consolidation when idle.",
+                    }
                 },
                 "required": ["action"],
             },
@@ -70,6 +75,7 @@ class HeartbeatService:
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         ticket_manager: TicketManager | None = None,
+        session_manager: Any | None = None,  # Add session_manager
         interval_s: int = 30 * 60,
         enabled: bool = True,
     ):
@@ -79,10 +85,12 @@ class HeartbeatService:
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.ticket_manager = ticket_manager
+        self.session_manager = session_manager
         self.interval_s = interval_s
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._last_idle_notify_time: datetime | None = None
 
     @property
     def heartbeat_file(self) -> Path:
@@ -96,28 +104,29 @@ class HeartbeatService:
                 return None
         return None
 
-    async def _decide(self, content: str) -> tuple[str, str]:
+    async def _decide(self, content: str) -> tuple[str, str, bool]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
-        Returns (action, tasks) where action is 'skip' or 'run'.
+        Returns (action, task, is_subconscious).
         """
         response = await self.provider.chat(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
-                {"role": "user", "content": (
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
-                    f"{content}"
+                {"role": "system", "content": (
+                    "You are a heartbeat agent. Review HEARTBEAT.md and report your decision.\n"
+                    "STRATEGY: Only pick the FIRST task marked with '[ ]'. Skip if none found.\n"
+                    "If idle, initiate subconscious reflection."
                 )},
+                {"role": "user", "content": content},
             ],
             tools=_HEARTBEAT_TOOL,
             model=self.model,
         )
 
         if not response.has_tool_calls:
-            return "skip", ""
+            return "skip", "", False
 
         args = response.tool_calls[0].arguments
-        return args.get("action", "skip"), args.get("tasks", "")
+        return args.get("action", "skip"), args.get("task", ""), args.get("is_subconscious", False)
 
     async def start(self) -> None:
         """Start the heartbeat service."""
@@ -161,23 +170,40 @@ class HeartbeatService:
         logger.info("Heartbeat: checking for tasks...")
 
         try:
-            action, tasks = await self._decide(content)
+            action, task, is_subconscious = await self._decide(content)
 
             if action != "run":
                 logger.info("Heartbeat: OK (nothing to report)")
-                # Even if LLM says skip, still check deferred ticket retries
                 await self._check_deferred_retries()
                 return
 
-            logger.info("Heartbeat: tasks found, executing...")
+            logger.info("Heartbeat: task found, executing: {}", task)
+            
+            # Send 'Starting' notification (including subconscious)
+            if self.on_notify:
+                if is_subconscious:
+                    start_msg = "🧠 **【潜意识反思启动】**\n\n老板，当前处于闲暇期，我正开始整理最近的消息记录，固化您的偏好与客体记忆。内容说明内容说明。数据内容说明。"
+                else:
+                    start_msg = f"⌛ **【心跳任务启动】**\n\n老板，我正开始处理此项异步研发任务：\n> {task}\n\n执行过程中我将保持静默，完成后会即时汇报结果。内容说明内容说明。数据内容说明。"
+                await self.on_notify(start_msg)
+
             if self.on_execute:
-                response = await self.on_execute(tasks)
+                response = await self.on_execute(task)
                 if response and self.on_notify:
+                    # Final notification for conclusion (success or failure)
+                    if is_subconscious:
+                        final_msg = "✅ **【潜意识反思完成】**\n\n老板，最近的记忆片段已成功归档至 `guests` 记忆池中。内容说明内容说明。数据内容说明。"
+                    else:
+                        final_msg = f"🏁 **【心跳任务完结】**\n\n针对任务：\n> {task}\n\n**我的汇报如下：**\n\n{response}\n\n请您查阅。内容说明内容说明。数据内容说明。"
+                    
                     logger.info("Heartbeat: completed, delivering response")
-                    await self.on_notify(response)
+                    await self.on_notify(final_msg)
 
             # Phase 3: Check deferred ticket retry status
             await self._check_deferred_retries()
+            
+            # Phase 4: Check for idle period ticket summary (9:00 - 21:00)
+            await self._check_idle_period_tickets()
 
         except Exception:
             logger.exception("Heartbeat execution failed")
@@ -218,6 +244,61 @@ class HeartbeatService:
 
                 # Resolve and archive the failed ticket
                 self.ticket_manager.resolve_ticket(ticket_id)
+
+    async def _check_idle_period_tickets(self) -> None:
+        """Phase 4: Periodic idle check (9:00 - 21:00, 3h silence).
+        
+        If Master has been silent for > 3 hours and it's within the day window,
+        send a gentle summary of active tickets.
+        """
+        if not self.session_manager or not self.ticket_manager or not self.on_notify:
+            return
+
+        # 1. Time window: 9:00 - 21:00
+        now = datetime.now()
+        if not (9 <= now.hour < 21):
+            return
+
+        # 2. Prevent spam: only notify once every 12 hours (or similar) of idle
+        if self._last_idle_notify_time and (now - self._last_idle_notify_time) < timedelta(hours=6):
+            return
+
+        # 3. Check silence: > 3 hours since last updated session
+        sessions = self.session_manager.list_sessions()
+        if not sessions:
+            return
+            
+        # Find the most recently updated session
+        last_updated_str = sessions[0].get("updated_at")
+        if not last_updated_str:
+            return
+            
+        last_updated = datetime.fromisoformat(last_updated_str)
+        if (now - last_updated) < timedelta(hours=3):
+            return
+
+        # 4. Check for active tickets
+        # Note: self.ticket_manager.tickets is a dict of active tickets
+        active_tickets = self.ticket_manager.tickets
+        if not active_tickets:
+            return
+
+        # 5. Send summary
+        count = len(active_tickets)
+        summary = "\n".join([f"- **{tk}**: {meta.get('content', '')[:50]}..." for tk, meta in list(active_tickets.items())[:5]])
+        if count > 5:
+            summary += f"\n- ...以及另外 {count - 5} 个工单"
+
+        msg = (
+            f"📋 **【工单待办巡检】**\n\n"
+            f"老板，我留意到您已休息一段时间了。目前系统中还有 **{count}** 个未完成工单：\n\n"
+            f"{summary}\n\n"
+            f"如果您现在有空，可以告诉我需要加急处理哪一个。内容说明。数据内容说明。"
+        )
+        
+        logger.info("Heartbeat: idle silence detected, sending ticket summary")
+        await self.on_notify(msg)
+        self._last_idle_notify_time = now
 
     def _remove_ticket_from_heartbeat(self, ticket_id: str) -> None:
         """Remove a specific ticket line from HEARTBEAT.md."""
