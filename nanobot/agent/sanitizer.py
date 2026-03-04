@@ -131,7 +131,6 @@ If the text contains leakage as defined above, rewrite the message into a brief,
                 temperature=0.0,
             )
             
-            result = self._strip_think(response.content or "")
             if result.upper() == "SAFE":
                 return content
             else:

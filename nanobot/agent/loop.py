@@ -23,6 +23,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.memory import MemorizeFactTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -69,6 +70,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        agent_name: str = "nanobot",
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -87,7 +89,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, agent_name=agent_name)
         self.sessions = session_manager or SessionManager(workspace)
         self.ticket_manager = TicketManager(workspace)
         self.tools = ToolRegistry()
@@ -129,6 +131,7 @@ class AgentLoop:
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        self.tools.register(MemorizeFactTool(workspace=self.workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -153,6 +156,9 @@ class AgentLoop:
             ticket_manager=self.ticket_manager,
             send_callback=self.bus.publish_outbound
         ))
+        
+        from nanobot.agent.tools.defer import DeferTaskTool
+        self.tools.register(DeferTaskTool(ticket_manager=self.ticket_manager))
 
         # Cross-session chat tools (available when DingTalk is enabled)
         if self.channels_config and hasattr(self.channels_config, "dingtalk"):
@@ -226,11 +232,18 @@ class AgentLoop:
         from types import SimpleNamespace
         
         calls = []
-        # Find all <tool_call> ... </tool_call> blocks
-        matches = re.finditer(r"<tool_call>\s*({[\s\S]*?})\s*</tool_call>", text)
+        # Capture everything between <tool_call> and </tool_call>, then extract the outermost JSON object
+        matches = re.finditer(r"<tool_call>\s*([\s\S]*?)\s*</tool_call>", text)
         for i, m in enumerate(matches):
             try:
-                data = json.loads(m.group(1))
+                raw = m.group(1).strip()
+                # Find the outermost JSON object boundaries
+                start = raw.find("{")
+                end = raw.rfind("}")
+                if start == -1 or end == -1 or end <= start:
+                    continue
+                json_str = raw[start:end + 1]
+                data = json.loads(json_str)
                 if "name" in data:
                     # Map to a structure similar to LiteLLM's tool call object
                     calls.append(SimpleNamespace(
@@ -242,7 +255,8 @@ class AgentLoop:
                             arguments=json.dumps(data.get("arguments", {}))
                         )
                     ))
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to parse inline <tool_call> block {}: {}", i, e)
                 continue
         return calls
 
@@ -283,7 +297,8 @@ class AgentLoop:
             logger.info("LLM call #{} returned in {:.1f}s (finish_reason={})", iteration, elapsed, response.finish_reason)
 
             if response.content:
-                logger.info("◀️ [LLM Output] Content:\n{}", response.content)
+                preview = response.content[:200] + "..." if len(response.content) > 200 else response.content
+                logger.info("◀️ [LLM Output] Content (preview):\n{}", preview)
             if response.has_tool_calls:
                 tc_hints = [{"name": t.name, "args": getattr(t, "arguments", {})} for t in response.tool_calls]
                 logger.info("◀️ [LLM Output] Tool Calls:\n{}", json.dumps(tc_hints, ensure_ascii=False, indent=2))
@@ -311,9 +326,11 @@ class AgentLoop:
                         response.tool_calls = extracted
                     else:
                         response.tool_calls.extend(extracted)
-                    response.has_tool_calls = True
-                    # Strip the tool call tags from content so they aren't sent to user
-                    response.content = re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", response.content).strip()
+                # ALWAYS strip tool_call tags from content, even if extraction failed.
+                # Raw XML must never be sent to the end user.
+                response.content = re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", response.content).strip()
+                if not response.content:
+                    response.content = None
 
             if response.has_tool_calls:
                 if on_progress:
@@ -479,7 +496,7 @@ class AgentLoop:
                                   content=final_content or "Background task completed.")
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.debug("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         is_master_identity = False
         conv_type = msg.metadata.get("conversation_type")
@@ -532,7 +549,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content=f"🐈 {self.context.agent_name} commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -553,6 +570,11 @@ class AgentLoop:
             self._consolidation_tasks.add(_task)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        
+        if mem_tool := self.tools.get("memorize_fact"):
+            if isinstance(mem_tool, MemorizeFactTool):
+                mem_tool.set_context(is_master=is_master_identity)
+
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -561,6 +583,12 @@ class AgentLoop:
             if isinstance(escalate_tool, EscalateToMasterTool):
                 sender_name = msg.metadata.get("sender_name", "")
                 escalate_tool.start_turn(msg.channel, msg.chat_id, msg.sender_id, guest_name=sender_name)
+
+        if defer_tool := self.tools.get("defer_to_background"):
+            from nanobot.agent.tools.defer import DeferTaskTool
+            if isinstance(defer_tool, DeferTaskTool):
+                sender_name = msg.metadata.get("sender_name", "")
+                defer_tool.start_turn(msg.channel, msg.chat_id, msg.sender_id, guest_name=sender_name)
 
         if cross_chat_tool := self.tools.get("send_cross_chat"):
             if isinstance(cross_chat_tool, SendCrossChatTool):
@@ -612,7 +640,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -625,6 +653,7 @@ class AgentLoop:
             t_aud = time.monotonic()
             audited_content = await sanitizer.audit_output(final_content, is_master=is_master_identity)
             logger.info("Sanitizer output audit took {:.1f}s", time.monotonic() - t_aud)
+            
             if audited_content != final_content:
                 final_content = audited_content
                 # Rewrite the last assistant message in internal history so it doesn't remember the leaked version
@@ -655,8 +684,8 @@ class AgentLoop:
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.success("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        preview = final_content[:150] + "..." if len(final_content) > 150 else final_content
+        logger.info("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
