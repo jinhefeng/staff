@@ -14,10 +14,9 @@ class EscalateToMasterTool(Tool):
 
     name = "escalate_to_master"
     description = (
-        "Use this tool ONLY when you are asked an sensitive, secure, or private question that you "
-        "do not have permission or certainty to answer, OR when a guest asks for the Master (老板/金总/主人). "
-        "This will asynchronously forward the question to the Master for human approval, "
-        "and provide an initial placating response to the user."
+        "当你被问到敏感、安全或隐私问题且你无权限或无把握回答时使用此工具，"
+        "或当访客要求联系老板（金总/主人）时使用。"
+        "此工具会异步将问题转发给老板审批，并立即给访客一个安抚性回复。"
     )
 
     def __init__(self, ticket_manager: TicketManager, send_callback: Any, master_channels: list[tuple[str, str]]):
@@ -47,11 +46,11 @@ class EscalateToMasterTool(Tool):
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "A concise summary of what the guest is asking for so the Master can make a decision. Adapt the language to match the original guest input (e.g. use English if they spoke English).",
+                    "description": "用中文简要概括访客的诉求，供老板做决策。【必须】与访客使用的语言保持一致（访客说中文就写中文，说英文就写英文）。",
                 },
                 "pacifier_message": {
                     "type": "string",
-                    "description": "What to reply directly to the guest right now, politely explaining that you need to check with the boss. E.g., '我已经将您的问题转交，请稍等' or 'I have forwarded your request, please wait'. MUST be in the exact same language the guest used.",
+                    "description": "立即回复给访客的安抚话术，礼貌说明需要跟老板确认。例如：'我已经将您的问题转交，请稍等'。【必须】与访客使用的语言一致。",
                 },
             },
             "required": ["summary", "pacifier_message"],
@@ -90,10 +89,9 @@ class ResolveTicketTool(Tool):
 
     name = "resolve_ticket"
     description = (
-        "Use this tool when you (acting on behalf of the Master) want to answer a pending ticket "
-        "and send a message back to the guest who asked the question. "
-        "For DEFERRED TASK tickets (工单内容以'[DEFERRED TASK]'开头), this will APPROVE the task "
-        "and add it to the HEARTBEAT.md execution queue instead of directly resolving it."
+        "当你（代表老板）要回复一个待处理工单并向访客发送消息时使用此工具。"
+        "对于延期任务工单（内容以'[DEFERRED TASK]'开头），此工具会【批准】该任务"
+        "并将其加入 HEARTBEAT.md 执行队列，而不是直接关闭工单。"
     )
 
     def __init__(self, ticket_manager: TicketManager, send_callback: Any, workspace: Path):
@@ -108,11 +106,11 @@ class ResolveTicketTool(Tool):
             "properties": {
                 "ticket_id": {
                     "type": "string",
-                    "description": "The exact ticket ID (e.g., TKT-1A2B3C4D)."
+                    "description": "工单的精确ID（例如 TKT-1A2B3C4D）。"
                 },
                 "message_to_guest": {
                     "type": "string",
-                    "description": "The final message to send back to the guest, written in an appropriate tone. Must match the language the guest originally used."
+                    "description": "回复给访客的最终消息，语气得体。【必须】与访客使用的语言一致。"
                 }
             },
             "required": ["ticket_id", "message_to_guest"]

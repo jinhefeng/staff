@@ -618,7 +618,7 @@ class AgentLoop:
                 if escalate_tool := self.tools.get("escalate_to_master"):
                     if isinstance(escalate_tool, EscalateToMasterTool):
                         await escalate_tool.execute(
-                            summary=f"[Sanitizer Escalation] Guest {guest_name} probing: {sanitizer_msg}",
+                            summary=f"[安全拦截] 访客 {guest_name} 的消息触发了安全审查: {sanitizer_msg}",
                             pacifier_message=""
                         )
                 return OutboundMessage(
@@ -763,10 +763,24 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI, cron, or heartbeat usage).
+        
+        If sender_id is not provided, attempts to use the first configured master_id
+        so that system-triggered messages (cron/heartbeat) are treated as Master
+        and skip the Sanitizer.
+        """
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        if not sender_id:
+            # Try to resolve a master ID so system calls aren't treated as Guest
+            if self.channels_config and hasattr(self.channels_config, "dingtalk"):
+                dt_cfg = getattr(self.channels_config, "dingtalk", None)
+                if dt_cfg and hasattr(dt_cfg, "master_ids") and dt_cfg.master_ids:
+                    sender_id = dt_cfg.master_ids[0]
+            if not sender_id:
+                sender_id = "system"
+        msg = InboundMessage(channel=channel, sender_id=sender_id, chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""

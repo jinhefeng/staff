@@ -19,11 +19,10 @@ class DeferTaskTool(Tool):
 
     name = "defer_to_background"
     description = (
-        "CRITICAL ANTI-LIP-SERVICE TOOL. Use this tool IMMEDIATELY ANY TIME you tell the user you will "
-        "'fix a skill later', 'look for an alternative', 'research something', or do ANY asynchronous background work. "
-        "DO NOT just promise to do it in text. You MUST use this tool to officially log the promise as a background task. "
-        "This tool creates a tracked ticket that is sent to Master for approval. "
-        "Only after Master approves will the task enter the execution queue."
+        "【防敷衍核心工具】当你准备向用户承诺'稍后修复技能'、'去找替代方案'、'研究一下'等任何异步后台工作时，"
+        "你【必须】立即使用此工具，将承诺正式登记为后台工单。"
+        "禁止只在文字中做出承诺而不调用此工具。"
+        "此工具会创建工单并通知老板审批，老板批准后任务才会进入执行队列。"
     )
 
     def __init__(self, ticket_manager: TicketManager, send_callback: Any, master_channels: list[tuple[str, str]]):
@@ -48,11 +47,11 @@ class DeferTaskTool(Tool):
             "properties": {
                 "task_description": {
                     "type": "string",
-                    "description": "What exactly you are promising to do in the background (e.g. 'Fix the Yahoo Finance stock API issue by finding a new source')",
+                    "description": "用中文描述你承诺要在后台完成的具体任务（例如：'修复雅虎财经股票API，寻找新的数据源'）",
                 },
                 "reply_to_user": {
                     "type": "string",
-                    "description": "What you want to say to the user right now (e.g. 'I will find a new data source and update the skill for you.')",
+                    "description": "你现在想对用户说的安抚回复（例如：'我会找新的数据源来更新这个技能'）。【必须】与用户使用的语言一致。",
                 },
             },
             "required": ["task_description", "reply_to_user"],
