@@ -62,6 +62,8 @@ class ContextBuilder:
     def _get_identity(self, is_master: bool = False) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
+        project_root = str(Path(workspace_path).parent)
+        builtin_skills_path = str(Path(project_root) / "nanobot" / "skills")
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.python_version()}"
         
@@ -84,13 +86,21 @@ class ContextBuilder:
 ## Runtime
 {runtime}
 
-## Workspace
-Your workspace is at: {workspace_path}
-- 长期全局记忆: {workspace_path}/memory/core/global.md (Master 可写入全局规则)
-- 访客私有记忆: {workspace_path}/memory/guests/{{user_id}}.md (各用户隔离)
-- 历史日志: {workspace_path}/memory/HISTORY.md (可供 grep 搜索)。每条记录以 [YYYY-MM-DD HH:MM] 开头。
-- 待办工单: {workspace_path}/memory/tickets/active_tickets.json (JSON 格式，读取此文件检查待处理的升级工单/工单)
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+## 环境与路径 (Environment & Paths)
+- 项目根目录 (Project Root): {project_root}
+- 工作区 (Workspace): {workspace_path}
+- 长期全局记忆: {workspace_path}/memory/core/global.md
+- 访客私有记忆: {workspace_path}/memory/guests/{{user_id}}.md
+- 历史日志: {workspace_path}/memory/HISTORY.md
+- 待办工单: {workspace_path}/memory/tickets/active_tickets.json
+
+### 技能系统路径 (Skills Paths)
+- 内置技能 (Built-in Skills): {builtin_skills_path}/{{skill-name}}/SKILL.md (你已获得显式物理读取授权)
+- 自定义技能 (Custom Skills): {workspace_path}/skills/{{skill-name}}/SKILL.md (最高优先级)
+
+**路径调用准则**：
+- 在进行文件操作（read/write/edit）时，必须使用上述绝对物理路径。
+- 严禁在路径参数开头添加 `workspace/` 逻辑前缀（例如：应使用 `{workspace_path}/skills/...` 而非 `workspace/skills/...`）。
 
 ## {self.agent_name} 行为准则
 - 在进行工具调用前说明意图，但严禁在收到结果前预测或声称结果已达成。

@@ -66,6 +66,12 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
+        # Path Correction: if LLM passes "workspace/skills/name" or "skills/name", strip prefix
+        if name.startswith("workspace/skills/"):
+            name = name.replace("workspace/skills/", "", 1)
+        elif name.startswith("skills/"):
+            name = name.replace("skills/", "", 1)
+            
         # Check workspace first
         workspace_skill = self.workspace_skills / name / "SKILL.md"
         if workspace_skill.exists():
