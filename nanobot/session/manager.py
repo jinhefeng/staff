@@ -62,6 +62,13 @@ class Session:
             out.append(entry)
         return out
     
+    def find_message_by_metadata(self, key: str, value: str) -> dict[str, Any] | None:
+        """Find a message in the session by metadata key/value, scanning backwards."""
+        for m in reversed(self.messages):
+            if m.get("metadata", {}).get(key) == value:
+                return m
+        return None
+    
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []

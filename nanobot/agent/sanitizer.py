@@ -142,3 +142,63 @@ class SanitizerAgent:
         except Exception:
             logger.exception("Output Auditor failed. Sending original message.")
             return content
+
+    async def check_promise_intent(self, user_content: str, assistant_content: str) -> bool:
+        """
+        Check if the assistant's content contains a promise to do something 
+        WITHOUT actually calling a tool (lip service).
+        Returns True if it's a "lip service" promise AND there was a user demand.
+        """
+        if not assistant_content or len(assistant_content.strip()) < 5:
+            return False
+            
+        # Basic greetings or general status phrases shouldn't trigger tickets
+        ignore_patterns = [
+            "你好", "您好", "早上好", "下午好", "晚上好", 
+            "我在", "收到", "明白", "我知道了", "这就来"
+        ]
+        if any(p in assistant_content for p in ignore_patterns) and len(assistant_content) < 15:
+            return False
+
+        prompt = f"""你是私人 AI 幕僚的【承诺审计员】。
+请分析以下对话，判断助理是否在对用户的具体需求“画大饼（口头承诺但不行动）”。
+
+### 判定流程：
+
+**Step 1: 需求判定**
+用户输入：``` {user_content} ```
+分析：用户是否提出了具体任务、查询请求或改进建议？（基础问候、闲聊、表情包不属于需求）。
+如果【无具体需求】，则无需后续判定，直接判定为 OK。
+
+**Step 2: 承诺匹配**
+助理回复：``` {assistant_content} ```
+分析：
+- 助理是否明确、具体地答应去执行上述需求（如：“我去查”、“我这就改”、“我会安排时间研究”）？
+- 且同一回复中完全没有展示任何工具调用（由系统内核处理，此处仅分析文本）。
+
+**结论判定 (LIP_SERVICE)**:
+- 只有当 Step 1 为【有需求】，且 Step 2 为【口头承诺但不行动】时，才回复："LIP_SERVICE"。
+
+**结论判定 (OK)**:
+- 其它所有情况（包括：无需求、已告知查不了、正常的闲聊反馈等）。
+
+回复格式要求（【严禁多言】）：
+- 仅回复："LIP_SERVICE" 或 "OK"
+"""
+        try:
+            logger.debug("Checking for promise/lip-service intent with demand context.")
+            response = await self.provider.chat(
+                messages=[
+                    {"role": "system", "content": "You are a contextual intent analyzer. Reply only with LIP_SERVICE or OK."},
+                    {"role": "user", "content": prompt},
+                ],
+                model=self.model,
+                temperature=0.0,
+            )
+            
+            result = self._strip_think(response.content or "").strip().upper()
+            return result == "LIP_SERVICE"
+
+        except Exception:
+            logger.exception("Promise intent check failed. Defaulting to OK.")
+            return False

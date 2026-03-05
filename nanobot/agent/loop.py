@@ -71,6 +71,8 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         agent_name: str = "nanobot",
+        session_max_messages: int = 2000,
+        session_clear_to_size: int = 1000,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -88,6 +90,8 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.session_max_messages = session_max_messages
+        self.session_clear_to_size = session_clear_to_size
 
         self.context = ContextBuilder(workspace, agent_name=agent_name)
         self.sessions = session_manager or SessionManager(workspace)
@@ -186,12 +190,12 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
-        except Exception as e:
+        except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
                 try:
                     await self._mcp_stack.aclose()
-                except Exception:
+                except BaseException:
                     pass
                 self._mcp_stack = None
         finally:
@@ -276,6 +280,7 @@ class AgentLoop:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
+        sop_retried = False
         final_content = None
         tools_used: list[str] = []
 
@@ -336,20 +341,22 @@ class AgentLoop:
                         response.tool_calls.extend(extracted)
                     
                     # ONLY strip tags if we actually extracted something.
-                    # This prevents code "disappearing" on parse failure.
+                    # This prevents content "disappearing" on parse failure.
                     response.content = re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", response.content).strip()
-                    if not response.content:
+                    if not response.content or not response.content.strip():
                         response.content = None
                 else:
                     # If extraction failed but tags are present, keeping the content 
                     # allows the SOP retry logic or the user to see what went wrong.
                     logger.info("Retaining <tool_call> tags in content due to extraction failure")
 
+            # Initialize 'clean' content (stripped of <think> blocks) for downstream logic
+            clean = self._strip_think(response.content) if response.content else None
+
             if response.has_tool_calls:
+                if on_progress and clean:
+                    await on_progress(clean)
                 if on_progress:
-                    clean = self._strip_think(response.content)
-                    if clean:
-                        await on_progress(clean)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
@@ -386,14 +393,16 @@ class AgentLoop:
                     and any(kw in clean for kw in denial_keywords)
                     and not tools_used
                     and iteration < self.max_iterations
+                    and not sop_retried
                 ):
                     logger.warning("Detected terse denial '{}'. Forcing SOP-compliant explanation.", clean)
+                    sop_retried = True
                     messages.append({
                         "role": "user", 
                         "content": (
                             "注意：根据《AGENTS SOP》第 5 条‘坦诚无能’原则，"
                             "如果因为工具缺失或配置问题无法完成任务，请诚实、平实地用人类大白话向用户详细汇报物理工具的缺失原因，"
-                            "禁止使用极简短句或傲慢的比喻。请重新生成您的回复。"
+                            "禁止使用极简短句或傲慢的比喻。请重新生成您的汇报内容。"
                         )
                     })
                     continue
@@ -449,18 +458,103 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
 
+
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
         async with self._processing_lock:
             try:
-                response = await self._process_message(msg)
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
-                    ))
+                # --- [SESSION QUOTE RECOVERY (Scheme N: Scenario-aware Thread)] ---
+                quote_id = msg.metadata.get("quote_msg_id")
+                # conversation_type is available in msg.metadata (from dingtalk.py) but will be stripped later
+                is_group_scene = msg.metadata.get("conversation_type") == "2"
+                
+                if quote_id and "[引用自" not in msg.content:
+                    logger.info("Recovering thread chain for quote_id={} (Group={})", quote_id, is_group_scene)
+                    session = self.sessions.get_or_create(msg.session_key)
+                    
+                    # 1. Recursive Search Strategy
+                    task_ids = {quote_id}
+                    
+                    # 1a. Trace Upward (Ancestors) - Shared by both scenes
+                    curr_search = quote_id
+                    while curr_search:
+                        found_parent = False
+                        for m in reversed(session.messages):
+                            m_meta = m.get("metadata", {})
+                            if m_meta.get("dingtalk_msg_id") == curr_search:
+                                parent_id = m_meta.get("quote_msg_id")
+                                if parent_id and parent_id not in task_ids:
+                                    task_ids.add(parent_id)
+                                    curr_search = parent_id
+                                    found_parent = True
+                                    break
+                                else:
+                                    curr_search = None
+                                    break
+                        if not found_parent:
+                            break
+                    
+                    # 1b. Trace Downward/Sideways - Group ONLY
+                    if is_group_scene:
+                        prev_size = 0
+                        while len(task_ids) > prev_size:
+                            prev_size = len(task_ids)
+                            for m in session.messages:
+                                m_meta = m.get("metadata", {})
+                                mid = m_meta.get("dingtalk_msg_id")
+                                qid = m_meta.get("quote_msg_id")
+                                if qid in task_ids and mid and mid not in task_ids:
+                                    task_ids.add(mid)
+
+                    # 2. Collect session messages
+                    related_msgs = []
+                    for m in session.messages:
+                        mid = m.get("metadata", {}).get("dingtalk_msg_id")
+                        if mid in task_ids:
+                            related_msgs.append(m)
+                    
+                    if related_msgs:
+                        # 3. Sort by timestamp
+                        related_msgs.sort(key=lambda x: x.get("timestamp", ""))
+                        
+                        # 4. Format prompt header
+                        timeline_str = ""
+                        for rm in related_msgs:
+                            role = rm.get("role", "unknown")
+                            r_meta = rm.get("metadata", {})
+                            name = r_meta.get("sender_name") or ("赵小刀(我)" if role == "assistant" else "用户")
+                            timestamp = rm.get("timestamp", "")[11:16] # HH:MM
+                            r_content = self._strip_think(rm.get("content", ""))
+                            timeline_str += f"[{timestamp}] {name}: {r_content}\n"
+                        
+                        msg.metadata["quote_context_header"] = (
+                            f"【重要上下文：讨论话题链回溯】\n"
+                            f"注意：以下是你当前回复的直接背景。请务必结合该话题链条中的信息进行精准且连贯的回复。\n"
+                            f"------------------\n"
+                            f"{timeline_str}"
+                            f"------------------\n"
+                        )
+                        logger.success("Thread recovered ({}): {} segments", "Tree" if is_group_scene else "Linear", len(related_msgs))
+                
+                # --- [IMMEDIATE PERSISTENCE] ---
+                # Save the user message immediately. It's the ONLY time it's saved.
+                session = self.sessions.get_or_create(msg.session_key)
+                is_group_persistence = msg.metadata.get("conversation_type") == "2"
+                persist_meta = self._clean_metadata(msg.metadata, is_group_persistence)
+                
+                # Global idempotency check
+                msg_id = msg.metadata.get("dingtalk_msg_id")
+                if not any(m.get("metadata", {}).get("dingtalk_msg_id") == msg_id for m in session.messages):
+                    self._save_turn(session, [{"role": "user", "content": msg.content, "metadata": persist_meta}], 0)
+                    # Scheme O: Automatic Session Pruning (Rolling Cleanup)
+                    self._prune_session_if_needed(session)
+                    self.sessions.save(session)
+                    logger.debug("User message persisted (Primary)")
+                else:
+                    logger.info("Message {} already exists in session, skipping save", msg_id)
+
+                # Scheme D: Atomic processing
+                await self._process_message(msg)
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise
@@ -648,9 +742,15 @@ class AgentLoop:
                     metadata=msg.metadata or {},
                 )
 
+        # Scheme M: Dynamic Context Injection & Transparency
+        effective_content = msg.content
+        if header := msg.metadata.get("quote_context_header"):
+            effective_content = f"{header}{msg.content}"
+            logger.info("DEBUG: Full Prompt for LLM:\n{}", effective_content)
+
         initial_messages = self.context.build_messages(
             history=history,
-            current_message=msg.content,
+            current_message=effective_content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
             is_master=is_master_context,
@@ -686,12 +786,81 @@ class AgentLoop:
                 if all_msgs and all_msgs[-1]["role"] == "assistant":
                     all_msgs[-1]["content"] = final_content
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+            # ANTI-LIP-SERVICE (Promise Checker)
+            # Only check if NO tools were actually used in this loop iteration (or only messaging tools)
+            has_action_tools = any(t not in ("message", "escalate_to_master") for t in tools_used)
+            if not has_action_tools and is_master_identity:
+                t_prom = time.monotonic()
+                is_lip_service = await sanitizer.check_promise_intent(msg.content, final_content)
+                logger.info("Promise intent check tool {:.1f}s -> {}", time.monotonic() - t_prom, is_lip_service)
+                if is_lip_service:
+                    # The agent made a promise but took no action. Force fallback!
+                    fallback_msg = "\n\n【系统拦截】：检测到口头承诺但未立刻执行动作。已自动挂载后台工单，将在闲暇时异步处理。"
+                    final_content += fallback_msg
+                    
+                    # Create the ticket programmatically
+                    guest_name = msg.metadata.get("sender_name", msg.sender_id)
+                    logger.warning("Agent made an empty promise. Creating fallback ticket for {}", guest_name)
+                    self.ticket_manager.create_ticket(
+                        guest_id=msg.sender_id,
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"[SYSTEM FALLBACK] User {guest_name} received a verbal promise from the agent but no action was taken.\nAgent response: {audited_content}",
+                        guest_name=guest_name
+                    )
+
+                    if all_msgs and all_msgs[-1]["role"] == "assistant":
+                        all_msgs[-1]["content"] = final_content
+
+        import uuid
+        correlation_id = str(uuid.uuid4())
+        
+        # Scheme D: Atomic Sync Send
+        # If we have content to send, publish it now and WAIT for the receipt before saving
+        remote_msg_id = None
+        is_msg_tool = (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn
+        
+        if not is_msg_tool:
+            outbound = OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+                metadata=msg.metadata or {},
+                correlation_id=correlation_id
+            )
+            # 1. Publish to bus
+            await self.bus.publish_outbound(outbound)
+            
+            # 2. Synchronously wait for remote message ID (timeout protection)
+            logger.info("Waiting for receipt ID for correlation_id={}...", correlation_id)
+            remote_msg_id = await self.bus.wait_for_receipt(correlation_id, timeout=3.0)
+            if remote_msg_id:
+                logger.info("Successfully received remote ID {} for {}", remote_msg_id, correlation_id)
+            else:
+                logger.warning("Timed out waiting for receipt for {}. Saving without remote ID.", correlation_id)
+
+        # 3. Inject IDs into metadata before saving to session
+        if all_msgs and all_msgs[-1]["role"] == "assistant":
+             all_msgs[-1].setdefault("metadata", {})["correlation_id"] = correlation_id
+             if remote_msg_id:
+                 all_msgs[-1]["metadata"]["dingtalk_msg_id"] = remote_msg_id
+
+        # 4. Save only new turns (Scheme N: ROLE ISOLATION)
+        # Identify group scene (this info is transient in all_msgs metadata)
+        is_group_save = msg.metadata.get("conversation_type") == "2"
+        skip = 1 + len(history)
+        for m in all_msgs[skip:]:
+            if m.get("role") == "user":
+                continue 
+            
+            if m.get("metadata"):
+                m["metadata"] = self._clean_metadata(m["metadata"], is_group_save)
+            # Save Assistant/Tool/System turns
+            self._save_turn(session, [m], 0)
+        
+        # Scheme O: Automatic Session Pruning (Rolling Cleanup)
+        self._prune_session_if_needed(session)
         self.sessions.save(session)
 
         # Ensure guest memory file exists for non-master users on first contact.
-        # Fixes: group chat consolidation threshold (memory_window=100) is rarely
-        # reached per-user, so guest memory was never created for group @mentions.
         if not is_master_identity and msg.sender_id not in ("Unknown", "user"):
             mem_store = MemoryStore(self.workspace)
             guest_file = mem_store._get_guest_file(msg.sender_id)
@@ -707,15 +876,43 @@ class AgentLoop:
                 mem_store.write_guest(msg.sender_id, initial)
                 logger.info("Created initial guest memory for {} ({})", sender_name, msg.sender_id)
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+        if not is_msg_tool:
+             preview = final_content[:150] + "..." if len(final_content) > 150 else final_content
+             logger.info("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        preview = final_content[:150] + "..." if len(final_content) > 150 else final_content
-        logger.info("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-        return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
-        )
+        return None  # Message already published in Scheme D
+
+    def _clean_metadata(self, metadata: dict, is_group: bool) -> dict:
+        """Sanitize metadata for Session storage based on Scheme O."""
+        clean = dict(metadata)
+        # Always remove massive prompt headers and temporary flags
+        clean.pop("quote_context_header", None)
+        clean.pop("quote_text", None)
+        clean.pop("conversation_type", None)
+        clean.pop("platform", None)
+        clean.pop("conversation_title", None)
+        clean.pop("correlation_id", None)  # Scheme O: Remove debugging correlation IDs
+        
+        if not is_group:
+            # Private chat: kill identity markers to keep it 100% clean
+            clean.pop("sender_name", None)
+            clean.pop("sender_id", None)
+        
+        return clean
+
+    def _prune_session_if_needed(self, session: Session) -> bool:
+        """Keep session size under control based on user configuration (Scheme O)."""
+        limit = self.session_max_messages
+        target = self.session_clear_to_size
+        
+        if len(session.messages) > limit:
+            to_remove = len(session.messages) - target
+            logger.info("Pruning session {}: size {} exceeds limit {}. Removing oldest {} messages.", 
+                        session.key, len(session.messages), limit, to_remove)
+            # Remove oldest messages
+            session.messages = session.messages[to_remove:]
+            return True
+        return False
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

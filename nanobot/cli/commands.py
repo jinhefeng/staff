@@ -311,6 +311,8 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        session_max_messages=config.agents.defaults.session_max_messages,
+        session_clear_to_size=config.agents.defaults.session_clear_to_size,
     )
     
     # Set cron callback (needs agent)
@@ -439,8 +441,14 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except BaseException:
+        import traceback
+        traceback.print_exc()   
+    finally:
+        import os
+        os._exit(0)
 
 
 

@@ -228,6 +228,8 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    session_max_messages: int = 2000  # Trigger cleanup if session exceeds this many lines
+    session_clear_to_size: int = 1000 # Retain this many lines after cleanup
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     name: str = "nanobot"
 

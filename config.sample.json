@@ -7,7 +7,9 @@
       "maxTokens": 8192,
       "temperature": 0.6,
       "maxToolIterations": 40,
-      "memoryWindow": 30
+      "memoryWindow": 30,
+      "sessionMaxMessages": 2000,
+      "sessionClearToSize": 1000
     }
   },
   "providers": {
