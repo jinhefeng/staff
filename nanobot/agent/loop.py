@@ -911,6 +911,8 @@ class AgentLoop:
                         session.key, len(session.messages), limit, to_remove)
             # Remove oldest messages
             session.messages = session.messages[to_remove:]
+            # Core Fix: Shift the consolidation cursor leftwards to prevent consolidate starvation
+            session.last_consolidated = max(0, session.last_consolidated - to_remove)
             return True
         return False
 

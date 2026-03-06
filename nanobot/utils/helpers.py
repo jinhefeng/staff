@@ -54,9 +54,11 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         added.append(str(dest.relative_to(workspace)))
 
     for item in tpl.iterdir():
-        if item.name.endswith(".md"):
+        if item.is_file() and item.name.endswith(".md") and item.name != "USER.md":
             _write(item, workspace / item.name)
-    _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
+            
+    _write(tpl / "memory" / "guests" / "guest_template.md", workspace / "memory" / "guests" / "guest_template.md")
+    _write(tpl / "memory" / "core" / "global.md", workspace / "memory" / "core" / "global.md")
     _write(None, workspace / "memory" / "HISTORY.md")
     (workspace / "skills").mkdir(exist_ok=True)
 

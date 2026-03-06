@@ -92,7 +92,17 @@ class MemoryStore:
         g_file = self._get_guest_file(user_id)
         if g_file.exists():
             return g_file.read_text(encoding="utf-8")
-        return "---\nTrustScore: 50\n---\n"
+        
+        # Load from template if it doesn't exist
+        template_file = self.guests_dir / "guest_template.md"
+        if template_file.exists():
+            content = template_file.read_text(encoding="utf-8")
+        else:
+            content = "---\nTrustScore: 50\n---\n"
+        
+        # Write it immediately so it exists for future reads in this flow
+        self.write_guest(user_id, content)
+        return content
 
     def write_guest(self, user_id: str, content: str) -> None:
         g_file = self._get_guest_file(user_id)
@@ -115,6 +125,19 @@ class MemoryStore:
             
         return f"## Core Global Knowledge (Read-Only)\n{global_mem}\n\n## Your Exclusive Memory Sandbox (Read-Write)\n{guest_mem}"
 
+    def _is_valid_memory(self, content: str | None) -> bool:
+        """Check if the memory content is valid and safe to write."""
+        if not content or not isinstance(content, str):
+            return False
+        # Prevent common invalid LLM placeholders
+        invalid_placeholders = {"none", "null", "undefined", "(empty)", "no changes", "n/a", "[]", "{}"}
+        if content.strip().lower() in invalid_placeholders:
+            return False
+        # Basic sanity check: content should be reasonably structured if it's supposed to be markdown
+        if len(content.strip()) < 5 and content.strip() not in {"---", ""}:
+            return False
+        return True
+
     async def consolidate(
         self,
         session: Session,
@@ -126,10 +149,7 @@ class MemoryStore:
         current_user_id: str = "UnknownGuest",
         is_master: bool = False,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
-
-        Returns True on success (including no-op), False on failure.
-        """
+        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call."""
         if archive_all:
             old_messages = session.messages
             keep_count = 0
@@ -147,41 +167,53 @@ class MemoryStore:
 
         lines = []
         for m in old_messages:
-            if not m.get("content"):
+            content = m.get("content")
+            if not content:
                 continue
+            # Basic sanitization of history lines to focus on core chat
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {content[:1000]}")
 
         current_global = self.read_global()
         current_guest = self.read_guest(current_user_id)
         
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+        prompt = f"""Process the following conversation snippet and update the agent's memory systems.
 
-## Current Global Knowledge Base (Read-Only for Guests)
+## 1. Current Global Knowledge Base (Read-Only context)
 {current_global or "(empty)"}
 
-## Current Exclusive Memory Sandbox for User {current_user_id} (Read-Write)
+## 2. Current Exclusive Memory Sandbox for User {current_user_id}
 {current_guest}
 
-## Conversation to Process
+## 3. Conversation to Process
 {chr(10).join(lines)}
 
-## Memory Philosophy Guide & Identity Context
-You are maintaining a human-like associative memory. You are analyzing a conversation between the Assistant and a user with ID: {current_user_id}.
-
-Is Master Mode: {'YES' if is_master else 'NO'}
-
-1. If it's a fact/strategy specifically relating to the current user, or an observation about them, write it to `guest_memory_update`.
-2. DO NOT lose the YAML header (e.g., `--- TrustScore: 50 ---`) when rewriting `guest_memory_update`.
-3. If Is Master Mode is YES and the user gives a global fact or rule, write the new comprehensive global memory to `global_knowledge_update`.
-4. If Is Master Mode is NO, you MUST NOT provide `global_knowledge_update`.
-5. Apply chromatic tags to facts: [Neutral], [Caution], [Strategy].
+## Instructions:
+1. **Identify NEW Facts**: Extract any important facts, rules, or preferences from the conversation.
+2. **Global Update (Both Master & Guests)**: 
+   - Is Master Mode (with highest authority): {'YES' if is_master else 'NO'}
+   - If there are new universally shared truths (e.g. general technical facts, public news), write to `global_knowledge_update`.
+   - **CRITICAL DOUBLE-LAYER RULES**:
+     - The global markdown MUST have two predefined sections: "### 👑 1. Master 认定的绝对真相" and "### 👥 2. 客体/群体共识总结的真相".
+     - If you are in **Master Mode (YES)**: You are authorized to overwrite or append to Section 1 (Master Absolute Truths) with Master's rulings.
+     - If you are NOT in Master Mode (NO): You are strictly **forbidden** from modifying Section 1. You may only summarize and add general non-private consensus facts into Section 2.
+     - If no new global info is found, just return the exact `current_global` content.
+3. **Guest Sandbox**: 
+   - Update `guest_memory_update` using EXACTLY the following Markdown structure. Do NOT invent new headings:
+     ### 🎭 基本特质与履历 (Persona & Basic Info)
+     ### 🛠️ 行为偏好与沟通习惯 (Preferences)
+     ### 🛡️ 专属口径与应对策略 (Tailored Narrative)
+     ### 📝 近期互动与挂机状态 (Recent Context & Unresolved Issues)
+   - Maintain and use structural colored tags (`[NEUTRAL]`, `[CAUTION]`, `[STRATEGY]`).
+   - **Precedence & Secrets**: If Master instructed you to keep a secret from this guest or lie, put it under "Tailored Narrative" with `[STRATEGY]`. If it contradicts Global Section 1, the Strategy is the absolute truth *for this guest only*.
+   - **Safety**: ALWAYS preserve the YAML header (e.g., `--- TrustScore: 50 ---`). Keep the total length concise.
+4. **Safety Guard**: NEVER return "None", "null", or empty strings for memory updates.
 """
 
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system", "content": "You are a senior memory architect. Your goal is to consolidate session history while ensuring data integrity and enforcing the dual-layer truth mechanism."},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
@@ -196,26 +228,52 @@ Is Master Mode: {'YES' if is_master else 'NO'}
             if isinstance(args, str):
                 args = json.loads(args)
             if not isinstance(args, dict):
-                logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
                 return False
 
+            # 1. Update History.md (Log)
             if entry := args.get("history_entry"):
                 if not isinstance(entry, str):
                     entry = json.dumps(entry, ensure_ascii=False)
                 self.append_history(entry)
                 
+            # 2. Update Guest Memory (Compacted)
             if update := args.get("guest_memory_update"):
                 if not isinstance(update, str):
                     update = json.dumps(update, ensure_ascii=False)
-                if update != current_guest:
-                    self.write_guest(current_user_id, update)
+                # Defensive check: Ensure it's not a placeholder and didn't lose YAML header if one was present
+                if self._is_valid_memory(update) and update != current_guest:
+                    if "TrustScore" in current_guest and "TrustScore" not in update:
+                        logger.warning("Memory consolidation: LLM dropped TrustScore header, rejecting update")
+                    else:
+                        self.write_guest(current_user_id, update)
 
-            if is_master:
-                if global_upd := args.get("global_knowledge_update"):
-                    if not isinstance(global_upd, str):
-                        global_upd = json.dumps(global_upd, ensure_ascii=False)
-                    if global_upd != current_global:
-                        self.write_global(global_upd)
+            # 3. Update Global Knowledge (Conflict Resolution & Double-Layer)
+            if global_upd := args.get("global_knowledge_update"):
+                if not isinstance(global_upd, str):
+                    global_upd = json.dumps(global_upd, ensure_ascii=False)
+                
+                # Physical Guard: Only overwrite if it's valid and informative
+                if self._is_valid_memory(global_upd) and global_upd != current_global:
+                    # Safety check
+                    if len(current_global) > 200 and len(global_upd) < 50:
+                         logger.error("Memory consolidation: Detected suspicious global memory shrinkage, blocking update")
+                    else:
+                        # Extra security validation: If not master, forbid tampering with section 1.
+                        # We use regex to extract the content of Section 1 in old and new global.
+                        if not is_master:
+                            import re
+                            def _extract_section_1(text):
+                                match = re.search(r'(###.*1\..*?真相)(.*?)(###.*2\..*?真相|$)', text, re.DOTALL)
+                                return match.group(2).strip() if match else ""
+                            
+                            old_s1 = _extract_section_1(current_global)
+                            new_s1 = _extract_section_1(global_upd)
+                            if old_s1 and new_s1 and old_s1 != new_s1:
+                                logger.warning("Consolidate Access Denied: Guest/Group chat attempted to modify Master Absolute Truths. Rejecting.")
+                            else:
+                                self.write_global(global_upd)
+                        else:
+                            self.write_global(global_upd)
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)

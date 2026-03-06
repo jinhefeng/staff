@@ -128,8 +128,9 @@ async def connect_mcp_servers(
 
                 if "/sse" in cfg.url or "iheatingos.com" in cfg.url:
                     # Use specialized SSE client for SSE endpoints
+                    # Pass a very large read timeout to prevent the default 5-minute disconnect of httpx
                     read, write = await stack.enter_async_context(
-                        sse_client(cfg.url, headers=combined_headers)
+                        sse_client(cfg.url, headers=combined_headers, sse_read_timeout=60 * 60 * 24 * 7)
                     )
                 else:
                     from mcp.client.streamable_http import streamable_http_client

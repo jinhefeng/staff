@@ -144,26 +144,25 @@
 - [x] 实施 Master 用户特定的安审豁免逻辑。
 - [x] 确保在注入引用上下文时，不会因为标记格式触碰安审红线。
 
----
 
-## 阶段二十五：系统集成验收测试 (Phase 25: Acceptance Testing) [Needs Review]
+## 阶段二十七：上下文过载与记忆治理 (Phase 27: Context & Memory Governance) [/]
+## 阶段二十七：上下文过载与记忆治理 (Phase 27: Context & Memory Governance) [x]
+- [x] **子阶段 A：配置优化 (会话降噪) [x]**
+    - [x] 修改 `config.json` 调优滑动窗口参数 (`sessionMaxMessages: 60`, `sessionClearToSize: 40`)
+    - [x] 配置生效验收 (检查模型接收的历史记录长度变化)
+- [x] **子阶段 B：会话拦截 (历史文本瘦身) [x]**
+    - [x] 修改 `nanobot/session/manager.py` 实现历史工具结果裁剪 (>1500字符自动截断)
+    - [x] 验证超长 `tool_result` 在历史记录中是否被正确截断
+- [x] **子阶段 C：记忆治理 (逻辑重构与安全) [x]**
+    - [x] 重构 `nanobot/agent/memory.py` 的 Global 更新逻辑（两阶段提炼、空值拦截、新事实优先）
+    - [x] 实现 `Guest Memory` 强制压缩 Prompt 约束
+    - [x] 增加代码级物理守卫 (防止 None/空值写入)
+    - [x] 最终回归验收 (冲突覆盖与空更新场景)
 
-> 详见 `.agents/docs/test_plan_phase25.md`
-
-### P0 必测
-- [ ] 测试一：Master 身份识别与安审绕过 (1.1~1.3)
-- [ ] 测试二：联邦记忆物理隔离 (2.1~2.4)
-- [ ] 测试三：三态安审防火墙 Guest 模式 (3.1~3.4)
-
-### P1 重要
-- [ ] 测试四：异步工单流 Escalate→Pacify→Resolve (4.1~4.3)
-- [ ] 测试五：潜意识反思引擎 ReflectionAgent (5.1~5.4)
-
-### P2 补充
-- [ ] 测试六：钉钉引用消息解析 (6.1~6.3)
-- [ ] 测试七：外交平行叙事 (7.1~7.3)
-
-## 阶段二十六：基础设施增强 (Phase 26: Infrastructure) [Planned]
-- [ ] 引用消息缓存持久化到文件系统
-- [ ] nanobot 上游合并 (HKUDS/nanobot v0.1.4.post3)
-- [ ] Git 备份：commit 并 push 所有改动
+## 阶段二十八：记忆架构清理与事实一致性优化 (Phase 28: Memory Architecture Cleanup & Consistency) [/]
+- [x] 评估废弃文件 (`MEMORY.md`, `USER.md`) 并重新设计基于角色的双层模型方案
+- [x] 彻底清理代码中的遗留废弃文件生成逻辑
+- [x] 依据 `staff_memory_philosophy.md` 初始化 `guest_template.md` (吸收了旧 user 模板要素) 与基于双区裁判的 `global.md` 骨架
+- [x] 修订相关代码，实现新的记忆模板下发写入、群聊客体专属逻辑以及冲突拦截
+- [/] 验证优化效果
+- [x] **追加任务**：DEBUG 排查 `history.md` 近期不持续更新停止追加的原因，并约束客体沙盒的维度还原脱节问题（V5 方案已落地生效）

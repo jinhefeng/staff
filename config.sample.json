@@ -8,8 +8,8 @@
       "temperature": 0.6,
       "maxToolIterations": 40,
       "memoryWindow": 30,
-      "sessionMaxMessages": 2000,
-      "sessionClearToSize": 1000
+      "sessionMaxMessages": 60,
+      "sessionClearToSize": 40
     }
   },
   "providers": {
