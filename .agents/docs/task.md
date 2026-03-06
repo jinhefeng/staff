@@ -166,3 +166,15 @@
 - [x] 修订相关代码，实现新的记忆模板下发写入、群聊客体专属逻辑以及冲突拦截
 - [/] 验证优化效果
 - [x] **追加任务**：DEBUG 排查 `history.md` 近期不持续更新停止追加的原因，并约束客体沙盒的维度还原脱节问题（V5 方案已落地生效）
+
+## 阶段二十九：优化 Heartbeat 和梦境提纯消息机制 (Phase 29: Heartbeat & Reflection Optimization) [x]
+- [x] 梳理 Heartbeat 与梦境提纯在 heartbeat/service.py 和 cli/commands.py 中的流程机制
+- [x] 屏蔽梦境提纯开始时的通知（即去除 is_subconscious=True 时的 start_msg）
+- [x] 增强梦境提纯结束时的通知，在结果中简要带入提纯总结以便查阅
+- [x] 发送通知，等待用户确认执行计划
+- [x] 修改代码并验证测试
+- [x] **追加任务**：将此类通知消息的发送逻辑抽象为一个通用的工具，通过此工具发送的消息不需要保存到session中，以节省token消耗。
+
+## 阶段三十：优化MCP的token传參
+- [] **DEBUG**发现很多次tool调用时没有拼接不要参数的情况，如token、ModelType等，
+

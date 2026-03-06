@@ -69,6 +69,7 @@ class SanitizerAgent:
                 ],
                 model=self.model,
                 temperature=0.0,
+                timeout=30.0,
             )
             
             result = self._strip_think(response.content or "")
@@ -129,6 +130,7 @@ class SanitizerAgent:
                 ],
                 model=self.model,
                 temperature=0.0,
+                timeout=45.0,
             )
             
             result = self._strip_think(response.content or "").strip()
@@ -194,6 +196,7 @@ class SanitizerAgent:
                 ],
                 model=self.model,
                 temperature=0.0,
+                timeout=30.0,
             )
             
             result = self._strip_think(response.content or "").strip().upper()

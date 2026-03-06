@@ -47,7 +47,7 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
+    action, tasks, _ = await service._decide("heartbeat content")
     assert action == "skip"
     assert tasks == ""
 
@@ -63,7 +63,7 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
                 ToolCallRequest(
                     id="hb_1",
                     name="heartbeat",
-                    arguments={"action": "run", "tasks": "check open tasks"},
+                    arguments={"action": "run", "task": "check open tasks"},
                 )
             ],
         )

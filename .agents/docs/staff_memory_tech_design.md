@@ -63,7 +63,16 @@ trust_score: 50
 - `load_groups()` / `save_group_info()` — 动态群组信息缓存读写 (Phase 25)
 - `read_guest(user_id)` / `write_guest(user_id, content)` — 客体记忆读写（含 YAML 解析）
 - `get_memory_context(is_master, current_user_id)` — Master 获取全集；Guest 获取 global + 本人专域
-- `consolidate(session, provider, model, is_master, current_user_id)` — 记忆巩固，分别写入 guest/global
+- `consolidate(session, provider, model, is_master, current_user_id)` — 记忆巩固。
+
+#### D. 记忆治理之“提炼-合并-守卫”流程 (Phase 27)
+1. **静默提炼 (Silent Extraction)**：LLM 仅提取新发现的事实。如果没有新信息，返回特殊标识。
+2. **权重合并 (Weighted Merge)**：要求 LLM 以新事实为最高权重合并回旧文件。新事实 > 旧事实（如果冲突）。
+3. **压缩 (Compaction)**：对 Guest 记忆执行强制瘦身，控制在 2000 字符以内，防止稀释 Attention。
+4. **物理读写守卫 (Write Protection)**：
+    - 拦截非法值（如 `"None"`, `"null"` 等）。
+    - 校验 YAML 历史标签（如 TrustScore 必须被保留）。
+    - 监控存储缩放率：防止因模型返回受限导致的全量数据覆盖。
 
 ## 3. 潜意识反思引擎 (Phase 20)
 
@@ -95,7 +104,8 @@ trust_score: 50
 
 **Output Auditor**：Core Agent 生成回复后，在发送前进行最终脱敏审查。检测到泄露（TrustScore、架构代码、内部标签等）时强制重写。
 
-**关键实现细节**：使用 `_strip_think()` 方法清洗 LLM 返回中的 `<think>` 推理标签，避免思维链内容被误判或泄露。
+**意图与表现分离 (Outbound Isolation - Phase 30)**：
+系统引入 `outbound_content` 变量，确保所有由 Sanitizer 产生的“【系统拦截】”贴条或 Fallback 警告**仅作用于外发层**，而不回填至 `.jsonl` 历史。这保证了大模型在后续轮次中加载的历史上下文始终是客观、纯净的，不包含系统自产的辅助性提示。
 
 ## 5. 异步工单安抚系统 (Phase 18)
 

@@ -10,6 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tickets import TicketManager
 
 
 class ContextBuilder:
@@ -18,11 +19,12 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     
-    def __init__(self, workspace: Path, agent_name: str = "nanobot"):
+    def __init__(self, workspace: Path, agent_name: str = "nanobot", ticket_manager: TicketManager | None = None):
         self.workspace = workspace
         self.agent_name = agent_name
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.tickets = ticket_manager or TicketManager(workspace)
     
     def build_system_prompt(
         self, 
@@ -40,6 +42,11 @@ class ContextBuilder:
         memory = self.memory.get_memory_context(is_master=is_master, current_user_id=current_user_id)
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        # Inject Ticket Summary
+        # For Master, show all. For Guests, show only their own (or generic info).
+        ticket_summary = self.tickets.get_summary(guest_id=None if is_master else current_user_id)
+        parts.append(f"# 待办工单状态 (Active Tickets)\n\n{ticket_summary}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:

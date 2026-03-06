@@ -180,6 +180,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        timeout: float | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -233,6 +234,9 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        
+        # Default safety timeout
+        kwargs["timeout"] = timeout or 180.0
         
         try:
             response = await acompletion(**kwargs)

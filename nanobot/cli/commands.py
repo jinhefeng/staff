@@ -311,8 +311,12 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        agent_name=config.agents.defaults.name,
         session_max_messages=config.agents.defaults.session_max_messages,
         session_clear_to_size=config.agents.defaults.session_clear_to_size,
+        session_background_max_messages=config.agents.defaults.session_background_max_messages,
+        session_background_clear_to_size=config.agents.defaults.session_background_clear_to_size,
+        session_background_cleanup_days=config.agents.defaults.session_background_cleanup_days,
     )
     
     # Set cron callback (needs agent)
@@ -511,6 +515,12 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        agent_name=config.agents.defaults.name,
+        session_max_messages=config.agents.defaults.session_max_messages,
+        session_clear_to_size=config.agents.defaults.session_clear_to_size,
+        session_background_max_messages=config.agents.defaults.session_background_max_messages,
+        session_background_clear_to_size=config.agents.defaults.session_background_clear_to_size,
+        session_background_cleanup_days=config.agents.defaults.session_background_cleanup_days,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on

@@ -179,12 +179,9 @@ class HeartbeatService:
 
             logger.info("Heartbeat: task found, executing: {}", task)
             
-            # Send 'Starting' notification (including subconscious)
-            if self.on_notify:
-                if is_subconscious:
-                    start_msg = "🧠 **【潜意识反思启动】**\n\n老板，当前处于闲暇期，我正开始整理最近的消息记录，固化您的偏好与客体记忆。内容说明内容说明。数据内容说明。"
-                else:
-                    start_msg = f"⌛ **【心跳任务启动】**\n\n老板，我正开始处理此项异步研发任务：\n> {task}\n\n执行过程中我将保持静默，完成后会即时汇报结果。内容说明内容说明。数据内容说明。"
+            # Send 'Starting' notification for normal async tasks ONLY
+            if self.on_notify and not is_subconscious:
+                start_msg = f"⌛ **【心跳任务启动】**\n\n老板，我正开始处理此项异步研发任务：\n> {task}\n\n执行过程中我将保持静默，完成后会即时汇报结果。内容说明内容说明。数据内容说明。"
                 await self.on_notify(start_msg)
 
             if self.on_execute:
@@ -192,7 +189,7 @@ class HeartbeatService:
                 if response and self.on_notify:
                     # Final notification for conclusion (success or failure)
                     if is_subconscious:
-                        final_msg = "✅ **【潜意识反思完成】**\n\n老板，最近的记忆片段已成功归档至 `guests` 记忆池中。内容说明内容说明。数据内容说明。"
+                        final_msg = f"✅ **【潜意识反思完成】**\n\n老板，最近的记忆片段已成功归档至 `guests` 记忆池中。\n\n**提纯总结如下：**\n\n{response}"
                     else:
                         final_msg = f"🏁 **【心跳任务完结】**\n\n针对任务：\n> {task}\n\n**我的汇报如下：**\n\n{response}\n\n请您查阅。内容说明内容说明。数据内容说明。"
                     
@@ -317,7 +314,7 @@ class HeartbeatService:
         content = self._read_heartbeat_file()
         if not content:
             return None
-        action, tasks = await self._decide(content)
+        action, tasks, _ = await self._decide(content)
         if action != "run" or not self.on_execute:
             return None
         return await self.on_execute(tasks)

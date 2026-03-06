@@ -167,3 +167,22 @@ class TicketManager:
             if meta.get("guest_id") == guest_id:
                 return True
         return False
+
+    def get_summary(self, guest_id: str | None = None) -> str:
+        """Returns a concise summary of active tickets.
+        If guest_id is provided, only returns tickets related to that guest.
+        """
+        filtered = []
+        for tk, meta in self.tickets.items():
+            if guest_id and meta.get("guest_id") != guest_id:
+                continue
+            # Keep summary concise
+            content = meta.get("content", "")
+            if len(content) > 60:
+                content = content[:57] + "..."
+            created = meta.get("created_at", "")[:16].replace("T", " ")
+            filtered.append(f"- [{tk}] {content} (Created: {created})")
+
+        if not filtered:
+            return "No active tickets."
+        return "\n".join(filtered)

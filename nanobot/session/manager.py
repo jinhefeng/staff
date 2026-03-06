@@ -197,6 +197,41 @@ class SessionManager:
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+
+    def cleanup_background_sessions(self, days: int) -> int:
+        """
+        Physically delete background sessions (heartbeat/cron) older than specified days.
+        
+        Args:
+            days: Threshold in days.
+            
+        Returns:
+            Number of deleted files.
+        """
+        import time
+        now = time.time()
+        cutoff = now - (days * 24 * 3600)
+        deleted_count = 0
+        
+        for path in self.sessions_dir.glob("*.jsonl"):
+            # Identify background sessions by filename
+            # Safe keys have replaced ":" with "_"
+            if path.name.startswith("cron_") or path.name.startswith("heartbeat"):
+                if path.stat().st_mtime < cutoff:
+                    try:
+                        logger.info("Cleaning up old background session: {}", path.name)
+                        path.unlink()
+                        deleted_count += 1
+                        # Also remove from cache if present
+                        # We don't have the original key easily here, but we can clear entire cache if needed
+                        # or just rely on the next get_or_create to fail gracefully
+                    except Exception:
+                        logger.exception("Failed to delete expired session file: {}", path)
+        
+        if deleted_count > 0:
+            self._cache.clear() # Clear cache to ensure consistency
+            
+        return deleted_count
     
     def list_sessions(self) -> list[dict[str, Any]]:
         """

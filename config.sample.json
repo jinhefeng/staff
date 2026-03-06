@@ -9,7 +9,10 @@
       "maxToolIterations": 40,
       "memoryWindow": 30,
       "sessionMaxMessages": 60,
-      "sessionClearToSize": 40
+      "sessionClearToSize": 40,
+      "sessionBackgroundMaxMessages": 100,
+      "sessionBackgroundClearToSize": 50,
+      "sessionBackgroundCleanupDays": 15
     }
   },
   "providers": {

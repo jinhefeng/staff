@@ -221,17 +221,37 @@ class ChannelsConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"  # Fallback model if provider has no model bound
-    provider: str = "auto"  # Provider name (e.g. "nvidia-qwen") or "auto" for auto-detection
-    max_tokens: int = 8192
-    temperature: float = 0.1
-    max_tool_iterations: int = 40
-    memory_window: int = 100
-    session_max_messages: int = 2000  # Trigger cleanup if session exceeds this many lines
-    session_clear_to_size: int = 1000 # Retain this many lines after cleanup
-    reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
-    name: str = "nanobot"
+    # 基础配置 (Basic Config)
+    workspace: str = Field(default="~/.nanobot/workspace", description="工作空间路径 (Workspace path)")
+    model: str = Field(default="anthropic/claude-opus-4-5", description="默认使用的 LLM 模型 (Default LLM model)")
+    provider: str = Field(default="auto", description="LLM 供应商，'auto' 表示自动识别 (LLM provider, 'auto' for auto-detection)")
+    max_tokens: int = Field(default=8192, description="单次回复最大 Token 数 (Max tokens per response)")
+    temperature: float = Field(default=0.1, description="采样温度，控制回复的随机性 (Sampling temperature)")
+    max_tool_iterations: int = Field(default=40, description="单次任务工具调用的最大迭代次数 (Max tool call iterations)")
+    name: str = Field(default="nanobot", description="幕僚的名称/角色标识 (Agent name/identity)")
+
+    # 记忆窗口与会话管理 (Memory & Session Management)
+    memory_window: int = Field(default=100, description="注入上下文的最近消息条数 (Number of recent messages in context)")
+    
+    # 活跃会话裁剪 (Active Session Pruning)
+    session_max_messages: int = Field(default=2000, description="普通会话达到此条数时触发自动裁剪 (Trigger pruning for normal sessions)")
+    session_clear_to_size: int = Field(default=1000, description="普通会话裁剪后保留的条数 (Messages retained after pruning)")
+    
+    # 后台会话管理 (Background Session Management - Heartbeat/Cron)
+    session_background_max_messages: int = Field(
+        default=100, 
+        description="后台任务(Heartbeat/Cron)会话的裁剪阈值，建议设小以节省 Token (Pruning threshold for background sessions)"
+    )
+    session_background_clear_to_size: int = Field(
+        default=50, 
+        description="后台任务裁剪后保留的条数，仅保留少量近期经验 (Messages retained for background sessions)"
+    )
+    session_background_cleanup_days: int = Field(
+        default=15, 
+        description="非活动后台会话文件(如旧的 cron_xxx.jsonl)的物理清理周期，单位：天 (Days before deleting inactive background sessions)"
+    )
+
+    reasoning_effort: str | None = Field(default=None, description="推理强度 (Reasoning effort: low/medium/high)")
 
 
 class AgentsConfig(Base):

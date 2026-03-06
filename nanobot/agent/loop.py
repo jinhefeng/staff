@@ -73,6 +73,9 @@ class AgentLoop:
         agent_name: str = "nanobot",
         session_max_messages: int = 2000,
         session_clear_to_size: int = 1000,
+        session_background_max_messages: int = 100,
+        session_background_clear_to_size: int = 50,
+        session_background_cleanup_days: int = 15,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -92,10 +95,13 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self.session_max_messages = session_max_messages
         self.session_clear_to_size = session_clear_to_size
+        self.session_background_max_messages = session_background_max_messages
+        self.session_background_clear_to_size = session_background_clear_to_size
+        self.session_background_cleanup_days = session_background_cleanup_days
 
-        self.context = ContextBuilder(workspace, agent_name=agent_name)
         self.sessions = session_manager or SessionManager(workspace)
         self.ticket_manager = TicketManager(workspace)
+        self.context = ContextBuilder(workspace, agent_name=agent_name, ticket_manager=self.ticket_manager)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -522,7 +528,7 @@ class AgentLoop:
                         for rm in related_msgs:
                             role = rm.get("role", "unknown")
                             r_meta = rm.get("metadata", {})
-                            name = r_meta.get("sender_name") or ("赵小刀(我)" if role == "assistant" else "用户")
+                            name = r_meta.get("sender_name") or (f"{self.context.agent_name}(我)" if role == "assistant" else "用户")
                             timestamp = rm.get("timestamp", "")[11:16] # HH:MM
                             r_content = self._strip_think(rm.get("content", ""))
                             timeline_str += f"[{timestamp}] {name}: {r_content}\n"
@@ -785,6 +791,12 @@ class AgentLoop:
                 # Rewrite the last assistant message in internal history so it doesn't remember the leaked version
                 if all_msgs and all_msgs[-1]["role"] == "assistant":
                     all_msgs[-1]["content"] = final_content
+            
+            # Store original final_content for persistence, use outbound_content for the external world
+            # This must be initialized here to avoid UnboundLocalError in regular flows
+            outbound_content = final_content
+            if final_content != audited_content:
+                outbound_content = audited_content
 
             # ANTI-LIP-SERVICE (Promise Checker)
             # Only check if NO tools were actually used in this loop iteration (or only messaging tools)
@@ -811,6 +823,10 @@ class AgentLoop:
 
                     if all_msgs and all_msgs[-1]["role"] == "assistant":
                         all_msgs[-1]["content"] = final_content
+                    
+                    # If sanitized/audited or fallback warning injected, it only goes to outbound_content
+                    # while the clean final_content stays in all_msgs for session saving.
+                    outbound_content = final_content
 
         import uuid
         correlation_id = str(uuid.uuid4())
@@ -822,7 +838,7 @@ class AgentLoop:
         
         if not is_msg_tool:
             outbound = OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+                channel=msg.channel, chat_id=msg.chat_id, content=outbound_content,
                 metadata=msg.metadata or {},
                 correlation_id=correlation_id
             )
@@ -902,8 +918,14 @@ class AgentLoop:
 
     def _prune_session_if_needed(self, session: Session) -> bool:
         """Keep session size under control based on user configuration (Scheme O)."""
-        limit = self.session_max_messages
-        target = self.session_clear_to_size
+        is_background = session.key == "heartbeat" or session.key.startswith("cron:")
+        
+        if is_background:
+            limit = self.session_background_max_messages
+            target = self.session_background_clear_to_size
+        else:
+            limit = self.session_max_messages
+            target = self.session_clear_to_size
         
         if len(session.messages) > limit:
             to_remove = len(session.messages) - target
@@ -1001,6 +1023,15 @@ class AgentLoop:
                     sender_id = dt_cfg.master_ids[0]
             if not sender_id:
                 sender_id = "system"
+        
+        # Periodic cleanup of old background sessions (triggered by any direct/background call)
+        try:
+            cleaned = self.sessions.cleanup_background_sessions(self.session_background_cleanup_days)
+            if cleaned > 0:
+                logger.info("Auto-cleanup: removed {} expired background session files", cleaned)
+        except Exception:
+            logger.exception("Background session cleanup failed")
+
         msg = InboundMessage(channel=channel, sender_id=sender_id, chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
