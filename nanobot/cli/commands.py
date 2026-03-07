@@ -399,8 +399,16 @@ def gateway(
         )
 
     async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
+        """Deliver a heartbeat response to the user's channel and persist to heartbeat session."""
         from nanobot.bus.events import OutboundMessage
+        
+        # Persist notification to 'heartbeat' session for reference recovery
+        if session_manager:
+            hb_session = session_manager.get_or_create("heartbeat")
+            hb_session.add_message(role="assistant", content=response)
+            session_manager.save(hb_session)
+            logger.debug("Heartbeat notification persisted to heartbeat session")
+
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
