@@ -134,21 +134,56 @@ class ResolveTicketTool(Tool):
             # Write to HEARTBEAT.md so HeartbeatService picks it up
             heartbeat_file = self.workspace / "HEARTBEAT.md"
             try:
-                with open(heartbeat_file, "a", encoding="utf-8") as f:
-                    f.write(f"\n- [ ] [TICKET {ticket_id}] {task_desc}\n")
-                logger.info("Approved deferred task {} and appended to HEARTBEAT.md", ticket_id)
+                content_lines = []
+                if heartbeat_file.exists():
+                    content_lines = heartbeat_file.read_text(encoding="utf-8").splitlines()
+                
+                ticket_marker = f"[TICKET {ticket_id}]"
+                # Check for duplicates
+                if any(ticket_marker in line for line in content_lines):
+                    logger.info("Deferred task {} already exists in HEARTBEAT.md, skipping", ticket_id)
+                else:
+                    new_entry = f"- [ ] {ticket_marker} {task_desc}"
+                    # Find insertion point: directly after "## Active Tasks"
+                    insert_idx = -1
+                    for i, line in enumerate(content_lines):
+                        if "## Active Tasks" in line:
+                            insert_idx = i + 1
+                            break
+                    
+                    logger.info("Synchronizing ticket to HEARTBEAT.md: {}", str(heartbeat_file.absolute()))
+                    
+                    if insert_idx != -1:
+                        # Skip any instruction text following the header (parenthetical instructions)
+                        if insert_idx < len(content_lines) and content_lines[insert_idx].strip().startswith("*"):
+                            insert_idx += 1
+                        
+                        # Add an empty line if needed for breathing room
+                        content_lines.insert(insert_idx, "")
+                        content_lines.insert(insert_idx + 1, new_entry)
+                        logger.info("Inserted task {} into Active Tasks section", ticket_id)
+                    else:
+                        # Fallback if header not found
+                        content_lines.append("")
+                        content_lines.append(f"## Active Tasks (待执行的异步任务)")
+                        content_lines.append(new_entry)
+                        logger.warning("Active Tasks header not found in HEARTBEAT.md, appended to end")
+
+                    heartbeat_file.write_text("\n".join(content_lines) + "\n", encoding="utf-8")
             except Exception as e:
-                logger.error("Failed to append deferred task to HEARTBEAT.md: {}", e)
+                logger.error("Failed to sync deferred task to HEARTBEAT.md: {}", e)
 
             # Notify the requester
             guest_id = ticket.get("guest_id", "")
             guest_channel = ticket.get("guest_channel", "")
             if guest_id and guest_channel and message_to_guest:
+                # 注入工单 ID 头部
+                formatted_msg = f"✅ **【工单回复】 {ticket_id}**\n\n{message_to_guest}"
                 asyncio.create_task(
                     self.send_callback(OutboundMessage(
                         channel=guest_channel,
                         chat_id=guest_id,
-                        content=message_to_guest
+                        content=formatted_msg
                     ))
                 )
 
@@ -162,11 +197,13 @@ class ResolveTicketTool(Tool):
         if not resolved:
             return f"Error: Ticket {ticket_id} not found or already resolved."
 
+        # 注入工单 ID 头部
+        formatted_msg = f"✅ **【工单回复】 {ticket_id}**\n\n{message_to_guest}"
         asyncio.create_task(
             self.send_callback(OutboundMessage(
                 channel=resolved["guest_channel"],
                 chat_id=resolved["guest_id"],
-                content=message_to_guest
+                content=formatted_msg
             ))
         )
 

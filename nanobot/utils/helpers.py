@@ -12,13 +12,25 @@ def ensure_dir(path: Path) -> Path:
 
 
 def get_data_path() -> Path:
-    """~/.nanobot data directory."""
+    """Nanobot data directory. Prefers local workspace if available, else ~/.nanobot."""
+    local_config = Path.cwd() / "config.json"
+    if local_config.exists():
+        # 如果存在本地配置，数据目录默认为当前目录
+        return ensure_dir(Path.cwd())
     return ensure_dir(Path.home() / ".nanobot")
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure workspace path. Defaults to ~/.nanobot/workspace."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    """Resolve and ensure workspace path. Defaults to ./workspace if local config exists."""
+    if workspace:
+        path = Path(workspace).expanduser().resolve()
+    else:
+        local_config = Path.cwd() / "config.json"
+        if local_config.exists():
+            path = Path.cwd() / "workspace"
+        else:
+            path = Path.home() / ".nanobot" / "workspace"
+    
     return ensure_dir(path)
 
 

@@ -89,7 +89,8 @@ def _init_prompt_session() -> None:
     except Exception:
         pass
 
-    history_file = Path.home() / ".nanobot" / "history" / "cli_history"
+    from nanobot.config.loader import get_data_dir
+    history_file = get_data_dir() / "workspace" / ".history" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _PROMPT_SESSION = PromptSession(
@@ -752,8 +753,9 @@ def _get_bridge_dir() -> Path:
     import shutil
     import subprocess
     
-    # User's bridge location
-    user_bridge = Path.home() / ".nanobot" / "bridge"
+    from nanobot.config.loader import get_data_dir
+    # Workspace-local bridge location
+    user_bridge = get_data_dir() / "workspace" / ".bridge_build"
     
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():

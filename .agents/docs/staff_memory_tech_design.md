@@ -110,7 +110,7 @@ trust_score: 50
 ## 5. 异步工单安抚系统 (Phase 18)
 
 ### 5.1 `TicketManager` (`agent/tickets.py`)
-JSON 持久化的工单池，存储于 `memory/tickets/active_tickets.json`。
+JSON 持久化的工单池，存储于 `workspace/tickets/active_tickets.json`。
 
 - `create_ticket(guest_id, channel, chat_id, content)` → 生成 `TKT-XXXXXXXX`
 - `resolve_ticket(ticket_id)` → 闭环并移除
@@ -149,3 +149,17 @@ JSON 持久化的工单池，存储于 `memory/tickets/active_tickets.json`。
 2. 所有外发消息必须经 Output Auditor 脱敏审查
 3. `<think>` 标签必须在所有 Sanitizer 响应解析前清洗
 4. Master 拥有绝对穿透权限，不受任何安审网关拦截
+## 9. 话题链回溯与跨会话引用恢复 (Thread Recovery)
+
+为了解决异步任务（如心跳工单）产生的上下文碎片化问题，系统实现了分层话题链回溯机制。
+
+### 9.1 分层检索模型
+1. **L1 (Memory)**: 搜索当前活跃 Session 的内存消息对象。
+2. **L2 (Local Session)**: 若内存未命中，扫描当前会话的物理 `.jsonl` 文件。
+3. **L3 (Cross-Session)**: 扫描全域心跳日志 `workspace/sessions/heartbeat.jsonl`，找回由于工单分发或定时任务导致的异步引用背景。
+
+### 9.2 技术决策与约束 (ADR)
+- **动态路径**: Workspace 相对路径必须从 `Config` 动态构造，禁止硬编码，以适配容器化或多实例部署。
+- **深度约束**: 检索行数上限绑定至配置项 `agents.defaults.memory_window`，防止非法引用导致的大规模日志扫描。
+- **性能方案**: 使用二进制逆序跳量扫描（Backward seeking），确保 IO 开销与日志总量解耦。
+- **原生渲染**: 维持非 XML 的文本引导语格式，确保对 LLM 提示词的干扰最小化，同时符合用户对简洁日志回溯的审美要求。

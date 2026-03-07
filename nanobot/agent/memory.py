@@ -133,8 +133,8 @@ class MemoryStore:
         invalid_placeholders = {"none", "null", "undefined", "(empty)", "no changes", "n/a", "[]", "{}"}
         if content.strip().lower() in invalid_placeholders:
             return False
-        # Basic sanity check: content should be reasonably structured if it's supposed to be markdown
-        if len(content.strip()) < 5 and content.strip() not in {"---", ""}:
+        # Basic sanity check: content should have some substance
+        if len(content.strip()) < 2:
             return False
         return True
 
@@ -189,7 +189,8 @@ class MemoryStore:
 {chr(10).join(lines)}
 
 ## Instructions:
-1. **Identify NEW Facts**: Extract any important facts, rules, or preferences from the conversation.
+1. **Identify NEW Facts & Profiles**: Extract any important facts, rules, or user preferences. 
+   - **Persona & Profiling**: Based on the conversation, update the user's personality traits (e.g., "heavy details", "impatient", "friendly") and communication habits.
 2. **Global Update (Both Master & Guests)**: 
    - Is Master Mode (with highest authority): {'YES' if is_master else 'NO'}
    - If there are new universally shared truths (e.g. general technical facts, public news), write to `global_knowledge_update`.
@@ -204,7 +205,10 @@ class MemoryStore:
      ### 🛠️ 行为偏好与沟通习惯 (Preferences)
      ### 🛡️ 专属口径与应对策略 (Tailored Narrative)
      ### 📝 近期互动与挂机状态 (Recent Context & Unresolved Issues)
-   - Maintain and use structural colored tags (`[NEUTRAL]`, `[CAUTION]`, `[STRATEGY]`).
+   - **Tagged Knowledge**: Maintain and use structural colored tags:
+     - `[NEUTRAL]`: Facts or simple observations.
+     - `[CAUTION]`: Taboos or sensitive topics for this user.
+     - `[STRATEGY]`: Communication instructions/narrative overrides.
    - **Precedence & Secrets**: If Master instructed you to keep a secret from this guest or lie, put it under "Tailored Narrative" with `[STRATEGY]`. If it contradicts Global Section 1, the Strategy is the absolute truth *for this guest only*.
    - **Safety**: ALWAYS preserve the YAML header (e.g., `--- TrustScore: 50 ---`). Keep the total length concise.
 4. **Safety Guard**: NEVER return "None", "null", or empty strings for memory updates.
@@ -240,10 +244,21 @@ class MemoryStore:
             if update := args.get("guest_memory_update"):
                 if not isinstance(update, str):
                     update = json.dumps(update, ensure_ascii=False)
-                # Defensive check: Ensure it's not a placeholder and didn't lose YAML header if one was present
+                
+                # Auto-recovery: If TrustScore header is missing but present in current_guest,补全它
+                import re
+                old_header_match = re.match(r'^(---\n.*?\n---)', current_guest, re.DOTALL)
+                new_header_match = re.match(r'^(---\n.*?\n---)', update, re.DOTALL)
+                
+                if old_header_match and not new_header_match:
+                    logger.info("Memory consolidation: Auto-restoring TrustScore header for {}", current_user_id)
+                    update = f"{old_header_match.group(1)}\n{update}"
+
+                # Defensive check: Ensure it's not a placeholder
                 if self._is_valid_memory(update) and update != current_guest:
+                    # Final check: Even after recovery, did it lose the header?
                     if "TrustScore" in current_guest and "TrustScore" not in update:
-                        logger.warning("Memory consolidation: LLM dropped TrustScore header, rejecting update")
+                        logger.warning("Memory consolidation: Update lost TrustScore header, rejecting")
                     else:
                         self.write_guest(current_user_id, update)
 

@@ -116,7 +116,7 @@ staff/
 │   │   ├── guests/              # 访客/用户私有记忆沙盒目录
 │   │   └── HISTORY.md           # 归档的历史摘要 (可搜索)
 │   ├── sessions/                # 会话上下文持久化记录
-│   ├── tickets/                 # 异步工单与任务状态数据
+│   ├── tickets/                 # 异步工单与任务状态数据 (扁平化路径)
 │   └── skills/                  # 用户定义的技能 SKILL.md 存放地
 ├── nanobot/                     # 核心引擎 (基于 HKUDS/nanobot)
 │   ├── agent/                   # Agent 逻辑层
@@ -140,7 +140,15 @@ staff/
 │   ├── session/                 # 会话内存管理
 │   ├── skills/                  # 系统级预置技能
 │   ├── templates/               # Prompt 初始模板
-│   └── utils/                   # 辅助函数库
+│   ├── utils/                   # 辅助函数库
+│   │   ├── monitor_collector.py # [NEW] 监控数据静态化采集器
+│   │   └── monitor_loop.sh      # [NEW] 采集循环守护脚本
+├── website/                     # 静态网页托管目录
+│   └── monitor/                 # [NEW] 实时监控 Dashboard
+│       ├── index.html           # 前端主入口
+│       ├── styles.css           # Premium 暗黑科技风样式
+│       ├── app.js               # 异步数据渲染逻辑
+│       └── data.json            # 采集器输出的中间态数据
 ├── config.json                  # 运行配置 (包含 API Keys/masterIds)
 ├── pyproject.toml               # Python 项目依赖管理
 ├── install.sh                   # 一键环境初始化脚本

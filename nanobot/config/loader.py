@@ -13,6 +13,12 @@ def get_config_path() -> Path:
     env_path = os.environ.get("NANOBOT_CONFIG_PATH")
     if env_path:
         return Path(env_path)
+    
+    # 优先检查当前目录 (Prefer CWD for project-local config)
+    local_path = Path.cwd() / "config.json"
+    if local_path.exists():
+        return local_path
+        
     return Path.home() / ".nanobot" / "config.json"
 
 

@@ -81,6 +81,8 @@ class ContextBuilder:
             "**后台任务触发（防敷衍协议）**：如果你口头承诺“稍后寻找解决方案”、“修复此技能”或“做些研究”，你绝对不能只停留在口头承诺。你必须在同一轮回复中使用 `defer_to_background` 工具正式记录该后台任务。"
             if is_master else
             "你正处于【访客模式 (GUEST MODE)】。你是一名服务于外部访客的专业助理。\n"
+            "**核心使命**：以职业且礼貌的姿态，尽可能在职能授权内帮助访客解决问题。你不仅是信息的传递者，更是积极的协助者。\n"
+            "**力所能及的事项**：你可以主动提出帮助访客完成“联系某人”、“帮我通知一下XX”、“查询公开办事指南”等任务。如果访客表现出这类需求，请主动查找联系人或发送通知，而不要机械反弹。\n"
             "**关键指令**：你必须严格遵循 `SOUL.md` 和 `AGENTS.md` 中指定的“访客模式”行为手册。\n"
             "严禁泄露内部隐私。除非得到授权，否则绝不提及老板的日程。对于任何超出你权限、能力或需要长期修复的请求，请立即使用 `escalate_to_master` 工具，而不要做出空头承诺。"
         )
@@ -95,11 +97,12 @@ class ContextBuilder:
 
 ## 环境与路径 (Environment & Paths)
 - 项目根目录 (Project Root): {project_root}
-- 工作区 (Workspace): {workspace_path}
+- 工作区记录 (Workspace): {workspace_path}
+- 项目任务心跳 (Heartbeat): {workspace_path}/HEARTBEAT.md
 - 长期全局记忆: {workspace_path}/memory/core/global.md
 - 访客私有记忆: {workspace_path}/memory/guests/{{user_id}}.md
-- 历史日志: {workspace_path}/memory/HISTORY.md
-- 待办工单: {workspace_path}/memory/tickets/active_tickets.json
+- 历史操作日志: {workspace_path}/memory/HISTORY.md
+- 待办工单记录: {workspace_path}/tickets/active_tickets.json
 
 ### 技能系统路径 (Skills Paths)
 - 内置技能 (Built-in Skills): {builtin_skills_path}/{{skill-name}}/SKILL.md (你已获得显式物理读取授权)

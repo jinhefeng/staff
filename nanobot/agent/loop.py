@@ -278,6 +278,51 @@ class AgentLoop:
                 continue
         return calls
 
+    def _find_message_in_jsonl(self, path: Path, msg_id: str, limit: int = 100) -> dict[str, Any] | None:
+        """Search for a message by dingtalk_msg_id in a JSONL file, scanning backwards."""
+        if not path.exists():
+            return None
+        
+        try:
+            # We use a simple but effective backward line-by-line search for memory efficiency
+            with open(path, "rb") as f:
+                f.seek(0, 2)  # Go to end
+                pos = f.tell()
+                buffer = bytearray()
+                lines_found = 0
+                
+                while pos > 0 and lines_found < limit:
+                    pos -= 1
+                    f.seek(pos)
+                    char = f.read(1)
+                    if char == b"\n":
+                        if buffer:
+                            try:
+                                line = buffer[::-1].decode("utf-8")
+                                data = json.loads(line)
+                                if data.get("metadata", {}).get("dingtalk_msg_id") == msg_id:
+                                    return data
+                            except Exception:
+                                pass
+                            lines_found += 1
+                            buffer = bytearray()
+                    else:
+                        buffer.extend(char)
+                
+                # Final check for first line
+                if buffer:
+                    try:
+                        line = buffer[::-1].decode("utf-8")
+                        data = json.loads(line)
+                        if data.get("metadata", {}).get("dingtalk_msg_id") == msg_id:
+                            return data
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning("Error searching message in {}: {}", path.name, e)
+        
+        return None
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -478,27 +523,36 @@ class AgentLoop:
                     logger.info("Recovering thread chain for quote_id={} (Group={})", quote_id, is_group_scene)
                     session = self.sessions.get_or_create(msg.session_key)
                     
-                    # 1. Recursive Search Strategy
+                    # 1. Recursive Search Strategy (Multi-source: Memory -> Session Persistence -> Heartbeat)
                     task_ids = {quote_id}
+                    heartbeat_path = self.workspace / "sessions" / "heartbeat.jsonl"
                     
-                    # 1a. Trace Upward (Ancestors) - Shared by both scenes
+                    # 1a. Trace Upward (Ancestors)
                     curr_search = quote_id
                     while curr_search:
-                        found_parent = False
+                        found_node = None
+                        
+                        # Phase 1: Search Memory / Current Session (L1/L2)
                         for m in reversed(session.messages):
-                            m_meta = m.get("metadata", {})
-                            if m_meta.get("dingtalk_msg_id") == curr_search:
-                                parent_id = m_meta.get("quote_msg_id")
-                                if parent_id and parent_id not in task_ids:
-                                    task_ids.add(parent_id)
-                                    curr_search = parent_id
-                                    found_parent = True
-                                    break
-                                else:
-                                    curr_search = None
-                                    break
-                        if not found_parent:
-                            break
+                            if m.get("metadata", {}).get("dingtalk_msg_id") == curr_search:
+                                found_node = m
+                                break
+                        
+                        # Phase 2: Search Heartbeat Log (L3)
+                        if not found_node:
+                            found_node = self._find_message_in_jsonl(heartbeat_path, curr_search, limit=self.memory_window)
+                            if found_node:
+                                logger.debug("L3 Hit: Found message {} in heartbeat.jsonl", curr_search)
+                        
+                        if found_node:
+                            parent_id = found_node.get("metadata", {}).get("quote_msg_id")
+                            if parent_id and parent_id not in task_ids:
+                                task_ids.add(parent_id)
+                                curr_search = parent_id
+                            else:
+                                curr_search = None
+                        else:
+                            curr_search = None
                     
                     # 1b. Trace Downward/Sideways - Group ONLY
                     if is_group_scene:
@@ -512,12 +566,22 @@ class AgentLoop:
                                 if qid in task_ids and mid and mid not in task_ids:
                                     task_ids.add(mid)
 
-                    # 2. Collect session messages
+                    # 1c. Collect session messages
                     related_msgs = []
+                    # First, grab from memory
                     for m in session.messages:
                         mid = m.get("metadata", {}).get("dingtalk_msg_id")
                         if mid in task_ids:
                             related_msgs.append(m)
+                    
+                    # Second, grab missing blocks from Heartbeat (L3)
+                    found_ids = {m.get("metadata", {}).get("dingtalk_msg_id") for m in related_msgs}
+                    missing_ids = task_ids - found_ids
+                    if missing_ids:
+                        for mid in missing_ids:
+                            h_msg = self._find_message_in_jsonl(heartbeat_path, mid, limit=self.memory_window)
+                            if h_msg:
+                                related_msgs.append(h_msg)
                     
                     if related_msgs:
                         # 3. Sort by timestamp

@@ -162,10 +162,16 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        # 归档逻辑前移：唤醒即执行物理归档，确保后续决策视图干净
+        await self._archive_completed_tasks()
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
             return
+
+        # 同步文件头部文案（动态化提示）
+        content = self._sync_file_header_with_config(content)
 
         logger.info("Heartbeat: checking for tasks...")
 
@@ -181,17 +187,21 @@ class HeartbeatService:
             
             # Send 'Starting' notification for normal async tasks ONLY
             if self.on_notify and not is_subconscious:
-                start_msg = f"⌛ **【心跳任务启动】**\n\n老板，我正开始处理此项异步研发任务：\n> {task}\n\n执行过程中我将保持静默，完成后会即时汇报结果。内容说明内容说明。数据内容说明。"
+                start_msg = f"⌛ **【心跳任务启动】**\n\n老板，我正开始处理此项异步研发任务：\n> {task}\n\n执行过程中我将保持静默，完成后会即时汇报结果。"
                 await self.on_notify(start_msg)
 
             if self.on_execute:
                 response = await self.on_execute(task)
+                
+                # 无论执行结果如何，只要执行完成了，就将该任务在文件中标记为完成
+                self._mark_task_completed(task)
+                
                 if response and self.on_notify:
                     # Final notification for conclusion (success or failure)
                     if is_subconscious:
                         final_msg = f"✅ **【潜意识反思完成】**\n\n老板，最近的记忆片段已成功归档至 `guests` 记忆池中。\n\n**提纯总结如下：**\n\n{response}"
                     else:
-                        final_msg = f"🏁 **【心跳任务完结】**\n\n针对任务：\n> {task}\n\n**我的汇报如下：**\n\n{response}\n\n请您查阅。内容说明内容说明。数据内容说明。"
+                        final_msg = f"🏁 **【心跳任务完结】**\n\n针对任务：\n> {task}\n\n**我的汇报如下：**\n\n{response}\n\n请您查阅。"
                     
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(final_msg)
@@ -297,6 +307,87 @@ class HeartbeatService:
         await self.on_notify(msg)
         self._last_idle_notify_time = now
 
+    def _mark_task_completed(self, task_desc: str) -> bool:
+        """Mark a task as completed in HEARTBEAT.md using a two-tier matching strategy."""
+        if not self.heartbeat_file.exists():
+            return False
+
+        try:
+            content = self.heartbeat_file.read_text(encoding="utf-8")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            
+            # Try to extract ticket ID from task_desc first to ensure we can resolve it later
+            ticket_id = None
+            ticket_match = re.search(r"TICKET (TKT-[A-Z0-9]+)", task_desc)
+            if ticket_match:
+                ticket_id = ticket_match.group(1)
+
+            # Tier 1: Exact Match
+            exact_pattern = rf"^- \[ \] \s*{re.escape(task_desc.strip())}\s*$"
+            if re.search(exact_pattern, content, re.MULTILINE):
+                new_line = f"- [x] {task_desc.strip()} (Done @ {timestamp})"
+                new_content = re.sub(exact_pattern, new_line, content, flags=re.MULTILINE)
+                self.heartbeat_file.write_text(new_content, encoding="utf-8")
+                
+                # Trigger physical archive if ticket ID is present
+                if ticket_id and self.ticket_manager:
+                    logger.info("Heartbeat (Tier 1): triggering physical archive for ticket {}", ticket_id)
+                    self.ticket_manager.resolve_ticket(ticket_id)
+                return True
+
+            # Tier 2: Ticket ID Match (Stable Anchor)
+            if ticket_id:
+                ticket_pattern = rf"^- \[ \] .*?{re.escape(ticket_id)}.*?$"
+                match = re.search(ticket_pattern, content, re.MULTILINE)
+                if match:
+                    original_line = match.group(0)
+                    if original_line.startswith("- [ ]"):
+                        new_line = original_line.replace("- [ ]", "- [x]", 1)
+                        if "(Done @" not in new_line:
+                            new_line += f" (Done @ {timestamp})"
+                        
+                        new_content = content.replace(original_line, new_line, 1)
+                        self.heartbeat_file.write_text(new_content, encoding="utf-8")
+                        
+                        if self.ticket_manager:
+                            logger.info("Heartbeat (Tier 2): triggering physical archive for ticket {}", ticket_id)
+                            self.ticket_manager.resolve_ticket(ticket_id)
+                        return True
+
+            logger.warning("Heartbeat: could not find task line to mark in file: {}", task_desc)
+            return False
+        except Exception as e:
+            logger.error("Failed to mark task as completed: {}", e)
+            return False
+
+    def _sync_file_header_with_config(self, content: str) -> str:
+        """Ensures the minutes mentioned in the header match current intervalS."""
+        minutes = str(self.interval_s // 60)
+        changed = False
+
+        # Match "你的底层引擎每 XX 分钟会唤醒你一次"
+        cn_pattern = r"(你的底层引擎每 )(\d+)( 分钟会唤醒你一次)"
+        if (m := re.search(cn_pattern, content)):
+            if m.group(2) != minutes:
+                content = re.sub(cn_pattern, rf"\1{minutes}\3", content)
+                changed = True
+
+        # Match "This file is checked every XX minutes"
+        en_pattern = r"(This file is checked every )(\d+)( minutes)"
+        if (m := re.search(en_pattern, content)):
+            if m.group(2) != minutes:
+                content = re.sub(en_pattern, rf"\1{minutes}\3", content)
+                changed = True
+
+        if changed:
+            try:
+                self.heartbeat_file.write_text(content, encoding="utf-8")
+                logger.info("Heartbeat: Synced file header instruction with config ({} minutes)", minutes)
+            except Exception as e:
+                logger.error("Failed to sync HEARTBEAT.md header: {}", e)
+
+        return content
+
     def _remove_ticket_from_heartbeat(self, ticket_id: str) -> None:
         """Remove a specific ticket line from HEARTBEAT.md."""
         try:
@@ -308,6 +399,70 @@ class HeartbeatService:
             logger.info("Removed ticket {} from HEARTBEAT.md", ticket_id)
         except Exception:
             logger.exception("Failed to clean HEARTBEAT.md for ticket {}", ticket_id)
+
+    async def _archive_completed_tasks(self) -> None:
+        """Physical archiving: move [x] lines from anywhere into the ## Completed section."""
+        if not self.heartbeat_file.exists():
+            return
+        
+        try:
+            content_lines = self.heartbeat_file.read_text(encoding="utf-8").splitlines()
+            active_tasks = []
+            completed_tasks = []
+            other_content = []
+            
+            # 识别主要区域
+            state = "header" # header, active, completed
+            for line in content_lines:
+                stripped = line.strip()
+                if stripped.startswith("## Active Tasks"):
+                    state = "active"
+                    other_content.append(line)
+                    continue
+                elif stripped.startswith("## Completed"):
+                    state = "completed"
+                    other_content.append(line)
+                    continue
+                elif stripped.startswith("---") or (stripped == "" and state == "header"):
+                    other_content.append(line)
+                    continue
+                
+                # 任务行识别
+                if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
+                    if stripped.startswith("- [x]"):
+                        completed_tasks.append(line)
+                    else:
+                        active_tasks.append(line)
+                else:
+                    other_content.append(line)
+
+            # 只有当有新完成的任务时才写回文件
+            if not completed_tasks:
+                return
+
+            # 构建新文件内容
+            new_lines = []
+            # 1. 写入 Header 和 Active 区域
+            found_active = False
+            found_completed = False
+            
+            for line in other_content:
+                new_lines.append(line)
+                if "## Active Tasks" in line:
+                    found_active = True
+                    # 插入活跃任务
+                    for task in active_tasks:
+                        new_lines.append(task)
+                elif "## Completed" in line:
+                    found_completed = True
+                    # 插入已完成任务
+                    for task in completed_tasks:
+                        new_lines.append(task)
+
+            self.heartbeat_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            logger.info("Archived {} completed tasks in HEARTBEAT.md", len(completed_tasks))
+        except Exception as e:
+            logger.error("Failed to archive completed tasks: {}", e)
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""

@@ -52,7 +52,16 @@ class NanobotDingTalkHandler(CallbackHandler):
         try:
             # Parse using SDK's ChatbotMessage for robust handling
             chatbot_msg = ChatbotMessage.from_dict(message.data)
-            logger.info("DEBUG: DingTalk Inbound Raw Data: {}", json.dumps(message.data, ensure_ascii=False, indent=2))
+            
+            # Deep Debug: Print full message data and internal attributes
+            logger.debug("DEBUG: DingTalk Inbound message.data: {}", json.dumps(message.data, ensure_ascii=False, indent=2))
+            try:
+                # Log all available attributes of the message object to see if markers are hidden outside .data
+                attrs = {name: str(getattr(message, name)) for name in dir(message) if not name.startswith('_') and not callable(getattr(message, name))}
+                logger.debug("DEBUG: DingTalk CallbackMessage object attributes: {}", attrs)
+            except Exception as debug_err:
+                logger.debug("Could not log message attributes: {}", debug_err)
+
 
             # Extract text content; fall back to raw dict if SDK object is empty
             content = ""
@@ -60,6 +69,15 @@ class NanobotDingTalkHandler(CallbackHandler):
                 content = chatbot_msg.text.content.strip()
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
+            
+            # Extract richText content if available (e.g. from DingTalk Mac client)
+            if not content:
+                rich_text = message.data.get("content", {}).get("richText")
+                if isinstance(rich_text, list):
+                    content = "".join([item.get("text", "") for item in rich_text]).strip()
+                    if content:
+                        logger.info("Extracted content from richText: {}", content)
+
 
             metadata = {}
             current_msg_id = message.data.get("msgId")

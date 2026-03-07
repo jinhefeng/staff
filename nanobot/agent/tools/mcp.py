@@ -148,7 +148,7 @@ async def connect_mcp_servers(
                         sse_client(
                             cfg.url,
                             headers=combined_headers,
-                            timeout=30.0,  # Explicit connection timeout (default is 5.0)
+                            timeout=float(cfg.tool_timeout or 30.0),  # Use configured tool timeout for connection too
                             sse_read_timeout=60 * 60 * 24 * 7,
                         )
                     )

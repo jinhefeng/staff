@@ -95,7 +95,9 @@ class SessionManager:
     def __init__(self, workspace: Path):
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
-        self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
+        # Legacy sessions are now relative to the parent of the current workspace if it's named 'workspace'
+        # to handle internal migrations without leaving the project root.
+        self.legacy_sessions_dir = self.workspace.parent / ".legacy_sessions"
         self._cache: dict[str, Session] = {}
     
     def _get_session_path(self, key: str) -> Path:

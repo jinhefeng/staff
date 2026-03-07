@@ -1,0 +1,2 @@
+name: data-summarize-llm-safe
+description: Compress massive structured data (JSON/CSV logs, sensor streams, API responses) into a compact, LLM-safe summary by extracting key trends, anomalies, and statistical profiles. Use this skill when input exceeds 100K tokens and you need to reduce context before sending to LLM. Automatically detects numeric, string, and time-series fields. Outputs structured JSON with total rows, column summaries, outliers, and time trends.

@@ -1,0 +1,66 @@
+{
+  "last_updated": "2026-03-08T02:12:35.423714",
+  "tickets": {
+    "total_active": 0,
+    "items": []
+  },
+  "heartbeat": {
+    "tasks": []
+  },
+  "sessions": {
+    "active_count": 14,
+    "recent": [
+      {
+        "name": "dingtalk_014224562537153949.jsonl",
+        "last_modified": "2026-03-08T02:06:58.894090",
+        "msg_count": 45
+      },
+      {
+        "name": "heartbeat.jsonl",
+        "last_modified": "2026-03-08T01:58:30.194514",
+        "msg_count": 54
+      },
+      {
+        "name": "dingtalk_357.jsonl",
+        "last_modified": "2026-03-07T23:15:39.825118",
+        "msg_count": 15
+      },
+      {
+        "name": "dingtalk_16191733200332613.jsonl",
+        "last_modified": "2026-03-07T16:25:26.613109",
+        "msg_count": 3
+      },
+      {
+        "name": "dingtalk_cidtcTnlaQTUzj5m2PoxGl3yw==.jsonl",
+        "last_modified": "2026-03-05T22:25:35.405924",
+        "msg_count": 17
+      },
+      {
+        "name": "cron_fc952b2e.jsonl",
+        "last_modified": "2026-03-05T17:41:33.344151",
+        "msg_count": 3
+      },
+      {
+        "name": "cron_4a1a998b.jsonl",
+        "last_modified": "2026-03-05T17:39:16.542752",
+        "msg_count": 3
+      },
+      {
+        "name": "cron_e4e4c191.jsonl",
+        "last_modified": "2026-03-05T16:55:10.658578",
+        "msg_count": 3
+      },
+      {
+        "name": "cron_7ece03ef.jsonl",
+        "last_modified": "2026-03-05T00:02:33.358198",
+        "msg_count": 3
+      },
+      {
+        "name": "dingtalk_092258372522754149.jsonl",
+        "last_modified": "2026-03-04T14:20:57.010165",
+        "msg_count": 53
+      }
+    ]
+  },
+  "deferred_tasks": []
+}

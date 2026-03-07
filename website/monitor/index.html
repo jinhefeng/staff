@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Staff Monitor - 实时监控中枢</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="overlay"></div>
+    <main class="dashboard">
+        <header class="header">
+            <div class="logo-area">
+                <h1>STAFF <span class="highlight">MONITOR</span></h1>
+                <div class="status-badge">
+                    <span class="pulse"></span>
+                    SYSTEM ONLINE
+                </div>
+            </div>
+            <div class="info-area">
+                <div class="time-widget">
+                    <span id="current-time">00:00:00</span>
+                    <span class="date" id="current-date">2024.03.07</span>
+                </div>
+                <div class="refresh-indicator">
+                    Next update in: <span id="refresh-timer">60</span>s
+                </div>
+            </div>
+        </header>
+
+        <section class="stats-grid">
+            <div class="stat-card">
+                <label>活跃工单</label>
+                <div class="value" id="stat-tickets">0</div>
+            </div>
+            <div class="stat-card">
+                <label>待办任务</label>
+                <div class="value" id="stat-heartbeat">0</div>
+            </div>
+            <div class="stat-card">
+                <label>近期会话</label>
+                <div class="value" id="stat-sessions">0</div>
+            </div>
+            <div class="stat-card highlight">
+                <label>后台延迟项</label>
+                <div class="value" id="stat-deferred">0</div>
+            </div>
+        </section>
+
+        <div class="content-layout">
+            <section class="panel main-panel">
+                <div class="panel-header">
+                    <h2>工单看板 / TICKETS</h2>
+                </div>
+                <div class="panel-body scrollable" id="ticket-list">
+                    <!-- Tickets will be injected here -->
+                    <div class="loading-placeholder">LOADING_DATA...</div>
+                </div>
+            </section>
+
+            <aside class="sidebar">
+                <section class="panel mini-panel">
+                    <div class="panel-header">
+                        <h2>HEARTBEAT 待办</h2>
+                    </div>
+                    <div class="panel-body scrollable" id="heartbeat-list">
+                        <!-- Tasks will be injected here -->
+                    </div>
+                </section>
+
+                <section class="panel mini-panel">
+                    <div class="panel-header">
+                        <h2>近期活动 / RECENT SESSIONS</h2>
+                    </div>
+                    <div class="panel-body" id="session-list">
+                        <!-- Sessions will be injected here -->
+                    </div>
+                </section>
+            </aside>
+        </div>
+
+        <footer class="footer">
+            <div class="footer-left">LAST ENGINE SYNC: <span id="last-sync">--:--:--</span></div>
+            <div class="footer-right">STAFF AGENTIC MONITORING V1.0</div>
+        </footer>
+    </main>
+    <script src="app.js"></script>
+</body>
+</html>

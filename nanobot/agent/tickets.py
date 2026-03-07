@@ -13,7 +13,7 @@ class TicketManager:
     """Manages asynchronous tickets escalated to Master."""
 
     def __init__(self, workspace: Path):
-        self.tickets_dir = ensure_dir(workspace / "memory" / "tickets")
+        self.tickets_dir = ensure_dir(workspace / "tickets")
         self.db_file = self.tickets_dir / "active_tickets.json"
         self.archive_file = self.tickets_dir / "archived_tickets.jsonl"
         self.tickets: Dict[str, Dict[str, Any]] = self._load()

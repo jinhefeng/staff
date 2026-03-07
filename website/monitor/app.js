@@ -1,0 +1,114 @@
+const DATA_URL = 'data.json';
+const REFRESH_INTERVAL = 60; // seconds
+
+let countdown = REFRESH_INTERVAL;
+
+// DOM Elements
+const elements = {
+    time: document.getElementById('current-time'),
+    date: document.getElementById('current-date'),
+    refreshTimer: document.getElementById('refresh-timer'),
+    lastSync: document.getElementById('last-sync'),
+    statTickets: document.getElementById('stat-tickets'),
+    statHeartbeat: document.getElementById('stat-heartbeat'),
+    statSessions: document.getElementById('stat-sessions'),
+    statDeferred: document.getElementById('stat-deferred'),
+    ticketList: document.getElementById('ticket-list'),
+    heartbeatList: document.getElementById('heartbeat-list'),
+    sessionList: document.getElementById('session-list')
+};
+
+function updateClock() {
+    const now = new Date();
+    elements.time.textContent = now.toLocaleTimeString('zh-CN', { hour12: false });
+    elements.date.textContent = now.toLocaleDateString('zh-CN').replace(/\//g, '.');
+}
+
+async function fetchData() {
+    try {
+        const response = await fetch(DATA_URL + '?t=' + Date.now());
+        const data = await response.json();
+        renderDashboard(data);
+        countdown = REFRESH_INTERVAL;
+    } catch (error) {
+        console.error('Failed to fetch data:', error);
+    }
+}
+
+function renderDashboard(data) {
+    // Stats
+    elements.statTickets.textContent = data.tickets.total_active;
+    elements.statHeartbeat.textContent = data.heartbeat.tasks.length;
+    elements.statSessions.textContent = data.sessions.active_count;
+    elements.statDeferred.textContent = data.deferred_tasks.length;
+    
+    const syncDate = new Date(data.last_updated);
+    elements.lastSync.textContent = syncDate.toLocaleTimeString('zh-CN', { hour12: false });
+
+    // Render Tickets
+    elements.ticketList.innerHTML = data.tickets.items.length ? '' : '<div class="loading-placeholder">暂无活跃工单</div>';
+    data.tickets.items.forEach(ticket => {
+        const isDeferred = ticket.content.includes('[DEFERRED TASK]');
+        const html = `
+            <div class="item ticket ${isDeferred ? 'deferred' : ''}">
+                <div class="item-meta">
+                    <span class="ticket-id">${ticket.id}</span>
+                    <span class="ticket-guest">${ticket.guest}</span>
+                    <span class="ticket-time">${formatTime(ticket.created_at)}</span>
+                </div>
+                <div class="item-content">${escapeHTML(ticket.content)}</div>
+            </div>
+        `;
+        elements.ticketList.insertAdjacentHTML('beforeend', html);
+    });
+
+    // Render Heartbeat
+    elements.heartbeatList.innerHTML = data.heartbeat.tasks.length ? '' : '<div class="loading-placeholder">无待办任务</div>';
+    data.heartbeat.tasks.forEach(task => {
+        const html = `
+            <div class="hb-item">
+                <span class="hb-status ${task.status}"></span>
+                <span class="hb-text">${escapeHTML(task.text)}</span>
+            </div>
+        `;
+        elements.heartbeatList.insertAdjacentHTML('beforeend', html);
+    });
+
+    // Render Sessions
+    elements.sessionList.innerHTML = '';
+    data.sessions.recent.forEach(session => {
+        const html = `
+            <div class="session-item">
+                <span class="session-name">${session.name.replace('.jsonl', '')}</span>
+                <span class="session-time">${formatTime(session.last_modified)}</span>
+            </div>
+        `;
+        elements.sessionList.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+function formatTime(isoString) {
+    if (!isoString) return '--:--';
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function escapeHTML(str) {
+    const p = document.createElement('p');
+    p.textContent = str;
+    return p.innerHTML;
+}
+
+// Timer Logic
+setInterval(() => {
+    updateClock();
+    countdown--;
+    if (countdown <= 0) {
+        fetchData();
+    }
+    elements.refreshTimer.textContent = countdown;
+}, 1000);
+
+// Init
+updateClock();
+fetchData();

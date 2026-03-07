@@ -222,7 +222,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     # 基础配置 (Basic Config)
-    workspace: str = Field(default="~/.nanobot/workspace", description="工作空间路径 (Workspace path)")
+    workspace: str = Field(default="./workspace", description="工作空间路径 (Workspace path)")
     model: str = Field(default="anthropic/claude-opus-4-5", description="默认使用的 LLM 模型 (Default LLM model)")
     provider: str = Field(default="auto", description="LLM 供应商，'auto' 表示自动识别 (LLM provider, 'auto' for auto-detection)")
     max_tokens: int = Field(default=8192, description="单次回复最大 Token 数 (Max tokens per response)")
