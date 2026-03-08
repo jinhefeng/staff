@@ -32,14 +32,14 @@ class ContextBuilder:
         is_master: bool = False,
         current_user_id: str = ""
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity(is_master=is_master)]
+        memory = self.memory.get_memory_context(is_master=is_master, current_user_id=current_user_id)
+        
+        parts = [self._get_identity(is_master=is_master, memory_context=memory, current_user_id=current_user_id)]
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context(is_master=is_master, current_user_id=current_user_id)
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -66,7 +66,7 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
     
-    def _get_identity(self, is_master: bool = False) -> str:
+    def _get_identity(self, is_master: bool = False, memory_context: str = "", current_user_id: str = "") -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         project_root = str(Path(workspace_path).parent)
@@ -82,16 +82,29 @@ class ContextBuilder:
             if is_master else
             "你正处于【访客模式 (GUEST MODE)】。你是一名服务于外部访客的专业助理。\n"
             "**核心使命**：以职业且礼貌的姿态，尽可能在职能授权内帮助访客解决问题。你不仅是信息的传递者，更是积极的协助者。\n"
+            "**性格定位**：你的对外公开身份是金总“新招聘”的助理。这有助于解释为什么你对某些历史细节还不完全熟悉。\n"
             "**力所能及的事项**：你可以主动提出帮助访客完成“联系某人”、“帮我通知一下XX”、“查询公开办事指南”等任务。如果访客表现出这类需求，请主动查找联系人或发送通知，而不要机械反弹。\n"
+            "**称呼准则**：严禁直呼其名。如果记忆中没有别名 (Alias)，请结合运行时上下文 (Runtime Context) 中的 `sender_title` 职位信息进行称呼（例如：“陈经理”、“王工”）。如果信息匮乏，请使用“您”或“这位朋友”等尊称。\n"
             "**关键指令**：你必须严格遵循 `SOUL.md` 和 `AGENTS.md` 中指定的“访客模式”行为手册。\n"
             "严禁泄露内部隐私。除非得到授权，否则绝不提及老板的日程。对于任何超出你权限、能力或需要长期修复的请求，请立即使用 `escalate_to_master` 工具，而不要做出空头承诺。"
         )
 
-        return f"""# {self.agent_name} 🐈
+        identity_part = f"""# {self.agent_name} 🐈
 
 你是 {self.agent_name}，一个专业、聪明且值得信赖的 AI 幕僚。
-{mode_instruction}
+{mode_instruction}"""
 
+        # Append Onboarding/Discovery SOP ONLY for the very first contact
+        _, exists = self.memory.read_guest(current_user_id)
+        if not is_master and not exists:
+            identity_part += f"\n\n## 首次接触引导 (First Contact Onboarding)\n" \
+                            "检测到这是你与该访客的历史上第一次交流。请执行以下引导流程：\n" \
+                            "1. **身份契合**：你现在的公开身份是金总“新招聘”的助理，利用这个身份可以自然地进行自我介绍。\n" \
+                            "2. **社交化补全**：在解决问题的间隙，通过社交辞令引导对方透露其姓名或与金总的关系。\n" \
+                            "3. **称称呼礼仪**：结合 `sender_title` 称呼对方为“XX老师”或使用尊称，绝不直呼姓名。"
+
+        # Append Runtime and Paths info
+        identity_part += f"""
 ## Runtime
 {runtime}
 
@@ -108,7 +121,7 @@ class ContextBuilder:
 - 内置技能 (Built-in Skills): {builtin_skills_path}/{{skill-name}}/SKILL.md (你已获得显式物理读取授权)
 - 自定义技能 (Custom Skills): {workspace_path}/skills/{{skill-name}}/SKILL.md (最高优先级)
 
-**路径调用准则**：
+**路径调用准则**:
 - 在进行文件操作（read/write/edit）时，必须使用上述绝对物理路径。
 - 严禁在路径参数开头添加 `workspace/` 逻辑前缀（例如：应使用 `{workspace_path}/skills/...` 而非 `workspace/skills/...`）。
 
@@ -122,12 +135,26 @@ class ContextBuilder:
 直接使用文本回复对话。仅在需要发送到特定聊天频道时才使用 'message' 工具。
 
 ## 跨会话消息传递
-你可以使用以下工具向其他钉钉用户或群组发送消息：
+你可以使用以下工具向其他钉钉用户或群组发送消息:
 1. `search_contacts` — 通过关键词（姓名/群组名）搜索组织架构目录。
 2. `send_cross_chat` — 通过 ID 向特定用户或群组发送消息。
 此功能要求信任分 (TrustScore) >= 85。首长（Master）用户不受此限制。
 
-**别名记录重要说明**：如果用户提到了他们的偏好姓名、昵称或别名（例如：“姜姐”），请使用 `update_memory` 工具将其作为 `Alias: 姜姐` 保存到他们的记忆档案中。这样你以后就可以通过 `search_contacts` 找到他们。"""
+**别名记录重要说明**: 如果用户提到了他们的偏好姓名、昵称或别名（例如：“姜姐”），请使用 `update_memory` 工具将其作为 `Alias: 姜姐` 保存到他们的记忆档案中。这样你以后就可以通过 `search_contacts` 找到他们。"""
+
+        return identity_part
+
+    def _get_missing_info_pillars(self, memory: str) -> list[str]:
+        """Identifies which core profile pillars are missing based on placeholders."""
+        if not memory:
+            return ["身份背景", "别名/称呼", "项目/职责"]
+            
+        pillars = []
+        if "未知访客" in memory or "(待收集)" in memory: pillars.append("身份背景")
+        if "暂无别名" in memory: pillars.append("别名/称呼")
+        if "(主要职业与跟进中的项目)" in memory or "(待评估" in memory: pillars.append("项目/职责")
+        
+        return pillars
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None, sender_name: str | None = None) -> str:

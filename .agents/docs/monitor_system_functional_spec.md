@@ -16,6 +16,10 @@
    - 展示最近活跃的对话记录（源文件、最后更新时间、消息条数）。
 4. **后台任务流 (Background Tasks)**：
    - 识别工单内容中包含 `[DEFERRED TASK]` 的条目，单独汇总展示。
+5. **系统动态 (System Events)**：【新增】
+   - 提取自 `workspace/sessions/heartbeat.jsonl`。
+   - 解析最近 60 条助理通知，展示系统实时运行深度日志。
+   - 区分显示“静默模式 (Silent Mode)”下的后台静默任务。
 
 ## 2. API 定义 (Data Structure)
 系统采用“文件静态化”方案，由后台脚本生成 `data.json` 给前端使用。
@@ -33,12 +37,19 @@
       {"text": "任务内容", "status": "pending/completed"}
     ]
   },
-  "sessions": {
-    "active_count": 5,
-    "recent": [...]
-  }
+  "events": [
+    {
+      "content": "通知内容",
+      "timestamp": "ISO-Date",
+      "is_silent": true/false
+    }
+  ]
 }
 ```
+
+## 3. 设计决策 (ADR)
+- **三栏布局决策**：为确保“静默守护”下的信息不丢失，Monitor 必须支持展示所有心跳流水。通过在页面右侧新增专属面板，实现对 `heartbeat.jsonl` 最近 60 条记录的无损回溯。
+- **视觉分级决策**：前端需对包含 `[SILENT]` 标记的消息执行透明度降低或标记处理。
 
 ## 3. 边缘案例处理
 - **数据延迟**：前端增加最后更新时间的强制显示，告知用户数据的新鲜度。

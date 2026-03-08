@@ -63,6 +63,7 @@ trust_score: 50
 - `load_groups()` / `save_group_info()` — 动态群组信息缓存读写 (Phase 25)
 - `read_guest(user_id)` / `write_guest(user_id, content)` — 客体记忆读写（含 YAML 解析）
 - `get_memory_context(is_master, current_user_id)` — Master 获取全集；Guest 获取 global + 本人专域
+- `update_md_field(user_id, updates)` — 【加固】原子化画像更新：基于特定锚点（### 🎭 基本特质与履历）的全段落重绘技术，通过 `(?m)` 模式锁定行首，物理清理脏行。
 - `consolidate(session, provider, model, is_master, current_user_id)` — 记忆巩固。
 
 #### D. 记忆治理之“提炼-合并-守卫”流程 (Phase 27)

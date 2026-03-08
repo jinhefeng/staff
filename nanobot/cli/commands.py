@@ -292,7 +292,55 @@ def gateway(
     cron = CronService(cron_store_path)
 
     session_manager = SessionManager(config.workspace_path)
-    
+    # Create tools (some will be lazy-wired)
+    # --- [SCHEME N: DYNAMIC WIRING - Deterministic Profile Sync Hook] ---
+    async def sync_dingtalk_profile(msg: "InboundMessage") -> None:
+        """Hook called by AgentLoop before processing to sync guest details."""
+        from nanobot.bus.events import InboundMessage
+        import re
+        if msg.channel != "dingtalk" or not msg.sender_id or msg.sender_id in ("direct", "Unknown", "user"):
+            return
+            
+        # Get memory from agent (injected after creation)
+        mem = agent.context.memory
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        # 1. Quick check for sync date
+        guest_md, exists = mem.read_guest(msg.sender_id)
+        if exists:
+            # Inline YAML parse to avoid heavy loading
+            last_sync_match = re.search(r'LastSyncDate:\s*"?(.*?)"?$', guest_md, re.MULTILINE)
+            last_sync = last_sync_match.group(1).strip() if last_sync_match else ""
+            if last_sync == today:
+                return # Already synced today
+                
+        # 2. Trigger sync via DingTalk directory service (lazy check)
+        nonlocal channels
+        dt_channel = channels.channels.get("dingtalk")
+        if not dt_channel:
+            return
+            
+        directory = getattr(dt_channel, "_directory", None)
+        if not directory:
+            return
+            
+        logger.info("Triggering Daily Deterministic Sync for guest={} via Agent Hook", msg.sender_id)
+        details = await directory.get_user_details(msg.sender_id)
+        if details:
+            updates = {
+                "LastSyncDate": today,
+                "DeptPath": details.get("org_path", ""),
+                "title": details.get("title", ""),
+                "name": details.get("name", ""),
+                "email": details.get("email", "")
+            }
+            if mem.update_guest_deterministic(msg.sender_id, updates):
+                logger.success("Deterministic profile sync completed for guest {}", msg.sender_id)
+                # Inject updated info into channel cache for UI enrichment in subsequent messages
+                if hasattr(dt_channel, "_user_info_cache"):
+                    dt_channel._user_info_cache[msg.sender_id] = details
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -318,6 +366,7 @@ def gateway(
         session_background_max_messages=config.agents.defaults.session_background_max_messages,
         session_background_clear_to_size=config.agents.defaults.session_background_clear_to_size,
         session_background_cleanup_days=config.agents.defaults.session_background_cleanup_days,
+        pre_process_hook=sync_dingtalk_profile,
     )
     
     # Set cron callback (needs agent)
@@ -402,17 +451,27 @@ def gateway(
         """Deliver a heartbeat response to the user's channel and persist to heartbeat session."""
         from nanobot.bus.events import OutboundMessage
         
-        # Persist notification to 'heartbeat' session for reference recovery
+        # Persist notification to 'heartbeat' session for reference recovery and monitor
         if session_manager:
             hb_session = session_manager.get_or_create("heartbeat")
             hb_session.add_message(role="assistant", content=response)
             session_manager.save(hb_session)
             logger.debug("Heartbeat notification persisted to heartbeat session")
 
+        # Check for [SILENT] token. If present, skip outbound message (Dinging logic)
+        if "[SILENT]" in response:
+            logger.info("Heartbeat notification marked as [SILENT], skipping outbound push")
+            return
+
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+            
+        # Strip potential [SILENT] or other technical tokens before sending (redundant if skipped above, 
+        # but good for partial matches or other future tokens)
+        clean_response = response.replace("[SILENT]", "").strip()
+        if clean_response:
+            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=clean_response))
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(

@@ -178,15 +178,34 @@
 - [x] **连接超时修正**：修改 `mcp.py` 使 SSE 连接超时与配置同步，解决长耗时调用中断问题。
 - [x] **配置化落地**：在 `config.json` 中为 `engi_mcp` 完成 180s 超时注入。
 
-## 阶段三十一：访客首聊引导与信息搜集 (Guest Onboarding & Discovery) [Needs Review]
-- [ ] **方案定义 (Definition Phase)**
-  - [ ] 更新 `.agents/docs/interaction_spec.md`，定义 Staff 与新访客的首聊交互 SOP（自我介绍 + 需求引导）。
-  - [ ] 更新 `.agents/docs/functional_spec.md`，明确“梦境提纯”所需的核心访客字段锚点（如姓名、职业、与主人关系等）。
-- [ ] **影响分析 (Impact Analysis Phase)**
-  - [ ] 评估新引导逻辑对现有 `Guest Sandbox` 隔离机制的影响。
-- [ ] **功能实施 (Execution Phase)**
-  - [ ] 改造 `nanobot` 核心逻辑：识别新访客（无本地记忆文件或 YAML 标头为空）并注入引导式 Prompt。
-  - [ ] 增强梦境提纯能力：优化反思逻辑，使其能从首聊对话中精确提取结构化客体画像，并回填至 `guest/{id}.md`。
+## 阶段三十一：访客首聊引导与信息确定性同步 (Guest Onboarding & Sync) [x]
+- [x] **方案定义 (Definition Phase)** [x]
+  - [x] 更新 `.agents/docs/interaction_spec.md`与 `functional_spec.md` 定义首聊 SOP 与字段锚点。
+  - [x] **[NEW]** 细化画像字段：部门名称支持动态根解析与全量路径转译，根文案对齐为“总公司”。
+- [x] **影响分析 (Impact Analysis Phase)** [x]
+  - [x] 验证 `Guest Sandbox` 隔离机制及其对确定性同步的支持。
+  - [x] 确立 DingTalk API 缓存策略（`_dept_names`）规避频限。
+- [x] **功能实施 (Execution Phase)** [x]
+  - [x] **[BUG FIX] 画像同步架构偏移与次生回归修复** [x]
+    - [x] **缺陷深度追溯 (Deep RCA)**: 定位引入 `AttributeError` 的具体对话断面 (Request 3) 和代码回退点。
+    - [x] **架构方案纠偏**: 提交《建议解决方案》V6，确保逻辑回归 Agent 层并恢复解耦。
+    - [x] **影子代码清理**: 移除了 `venv` 中导致修改失效的 `nanobot` 影子包。
+    - [x] **回归缺陷修复**: 修正了 `dingtalk.py` (AttributeError) 和 `context.py` (NameError) 中的代码手误。
+    - [x] **代码执行与验证**: 获取用户确认后，执行最终修复并验证画像物理回写功能。
+    - [x] 撤销 `commands.py` / `manager.py` / `dingtalk.py` 的不当注入
+    - [x] 在 `AgentLoop._process_message` 实现同步拦截
+  - [x] **首次接触识别 (First Contact)**: 已在 `ContextBuilder` 中通过磁盘文件存在性感知并注入 SOP。
+  - [x] **确定性同步集成 (Deterministic Sync)**:
+    - [x] **[BUG FIX] 组织架构路径解析异常**: 修复 `get_user_org_path` 中的类型混淆错误。
+    - [x] **[NEW] 画像回写加固 (Atomic Rewrite)**: 实现基于锚点（Section-based）的原子化段落重写，彻底解决换行错位。
+    - [x] 集成 `department/get` 接口获取部门名称（修正 `name` vs `dept_name` 字段差异）。
+    - [x] 注入内存缓存 `_dept_names` 优化 API 配额消耗。
+    - [x] 集成 `department/listparentbyuser` 接口获取组织架构全路径。
+    - [x] **实时入站同步**: 借助 `pre_process_hook` 实现第一轮对话前物理更新画像，无需“预取注入”冗余子任务。
+  - [x] **梦境提纯 (Legacy Concept)**: 关于部门提取的提纯逻辑已废弃，由确定性同步物理取代。
+    - [x] 优化反思逻辑，确保画像信息包含完整的组织架构路径。
+    - [x] 画像持久化：将部门名称及层级结构写入 `guest/{id}.md`。
+  - [x] **设计同步 (Design Extraction)**: 完成会话设计变更向 `.agents/docs` 核心文档的同步，包含 ADR 记录。
 
 ## 阶段三十二：项目调度人格与场景验证 (PM Scheduling & Scenario Validation) [Needs Review]
 - [ ] **方案设计：调度算法与人格闭环 (Design Phase)**

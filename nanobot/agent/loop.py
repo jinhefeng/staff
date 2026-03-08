@@ -76,6 +76,7 @@ class AgentLoop:
         session_background_max_messages: int = 100,
         session_background_clear_to_size: int = 50,
         session_background_cleanup_days: int = 15,
+        pre_process_hook: Callable[[InboundMessage], Awaitable[None]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -98,6 +99,7 @@ class AgentLoop:
         self.session_background_max_messages = session_background_max_messages
         self.session_background_clear_to_size = session_background_clear_to_size
         self.session_background_cleanup_days = session_background_cleanup_days
+        self._pre_process_hook = pre_process_hook
 
         self.sessions = session_manager or SessionManager(workspace)
         self.ticket_manager = TicketManager(workspace)
@@ -656,6 +658,13 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        # --- [PRE-PROCESSING (e.g. Deterministic Profile Sync)] ---
+        if self._pre_process_hook:
+            try:
+                await self._pre_process_hook(msg)
+            except Exception as e:
+                logger.error("Pre-process hook failed: {}", e)
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id

@@ -88,21 +88,125 @@ class MemoryStore:
             safe_id = "default_guest"
         return self.guests_dir / f"{safe_id}.md"
 
-    def read_guest(self, user_id: str) -> str:
+    def read_guest(self, user_id: str) -> tuple[str, bool]:
+        """Read guest memory. Returns (content, exists)."""
         g_file = self._get_guest_file(user_id)
         if g_file.exists():
-            return g_file.read_text(encoding="utf-8")
+            return g_file.read_text(encoding="utf-8"), True
         
         # Load from template if it doesn't exist
         template_file = self.guests_dir / "guest_template.md"
         if template_file.exists():
             content = template_file.read_text(encoding="utf-8")
         else:
-            content = "---\nTrustScore: 50\n---\n"
+            content = "---\nTrustScore: 50\nLastSyncDate: \"\"\n---\n"
         
         # Write it immediately so it exists for future reads in this flow
         self.write_guest(user_id, content)
-        return content
+        return content, False
+
+    def update_guest_deterministic(self, user_id: str, updates: dict[str, Any]) -> None:
+        """Deterministically update guest memory fields (metadata and content).
+        Directly manipulates YAML and text to avoid LLM hallucination.
+        """
+        content, _ = self.read_guest(user_id)
+        
+        # 1. Update YAML Header
+        header_match = re.match(r'^(---\n.*?\n---)', content, re.DOTALL)
+        if header_match:
+            header_str = header_match.group(1)
+            body_str = content[len(header_str):]
+            
+            # Simple YAML parser-like logic for our controlled schema
+            for key, val in updates.items():
+                if key in ["TrustScore", "LastSyncDate"]:
+                    pattern = rf"^{key}:.*$"
+                    if re.search(pattern, header_str, re.MULTILINE):
+                        header_str = re.sub(pattern, f"{key}: {val}", header_str, flags=re.MULTILINE)
+                    else:
+                        # Append before the closing ---
+                        header_str = header_str.replace("\n---", f"\n{key}: {val}\n---")
+            
+            content = header_str + body_str
+
+        # 1. Section extraction
+        # We target the section between '### 🎭 基本特质与履历' and the next '###'
+        marker = "### 🎭 基本特质与履历"
+        if marker not in content:
+            content += f"\n\n{marker}\n"
+        
+        # Split content into parts: before, section, after
+        # Safely capture everything BEFORE the marker
+        marker_idx = content.find(marker)
+        before_marker = content[:marker_idx]
+        rest = content[marker_idx + len(marker):]
+        
+        # Find where the next section starts
+        next_section_pos = rest.find("\n###")
+        if next_section_pos != -1:
+            section_content = rest[:next_section_pos]
+            after_section = rest[next_section_pos:]
+        else:
+            section_content = rest
+            after_section = ""
+
+        # 2. Parse existing KV and schema
+        # schema: (internal_key, Display Label, [Search Patterns])
+        schema = [
+            ("name", "Name (姓名)", [r"Name\s*\(姓名\)", r"Name", r"姓名"]),
+            ("email", "Email (邮箱)", [r"Email\s*\(邮箱\)", r"Email", r"邮箱"]),
+            ("title", "Title (职位)", [r"Title\s*\(职位\)", r"Title", r"职位"]),
+            ("DeptPath", "DeptPath (组织架构)", [r"DeptPath\s*\(组织架构\)", r"DeptPath"]),
+        ]
+        
+        kv_map = {}
+        # Parse existing values to preserve them if not in 'updates'
+        for key, display, patterns in schema:
+            combined = "|".join(patterns)
+            match = re.search(rf"(?m)^([- \t]*(\*\*)?({combined})(\*\*)?:\s*)(.*)$", section_content)
+            if match:
+                kv_map[key] = match.group(5).strip()
+
+        # 3. Apply updates
+        schema_keys = [s[0] for s in schema]
+        for k, v in updates.items():
+            if k in schema_keys:
+                kv_map[k] = str(v).strip().replace("\n", " ").replace("\r", "")
+
+        # 4. Reconstruct the clean section
+        new_section_lines = [marker]
+        for key, display, _ in schema:
+            val = kv_map.get(key, "")
+            new_section_lines.append(f"- **{display}**: {val}")
+        
+        # Preserve other non-schema fields (Identity, etc)
+        # We also filter out any 'orphan' lines that were likely residuals of our schema keys
+        schema_lookup_combined = "|".join([p for _, _, pats in schema for p in pats])
+        
+        for line in section_content.splitlines():
+            clean_line = line.strip()
+            if not clean_line or clean_line.startswith("###"): continue
+            
+            # If it's a schema field, it's already handled
+            if re.match(rf"^([- \t]*(\*\*)?({schema_lookup_combined})(\*\*)?:\s*)", clean_line):
+                continue
+            
+            # If it's an orphan line matching a value we just updated, discard it to fix the 'newline bug'
+            is_orphan = False
+            if not clean_line.startswith("-"):
+                for val in kv_map.values():
+                    if val and val in clean_line and len(clean_line) < len(val) + 5:
+                        is_orphan = True
+                        break
+            
+            if not is_orphan:
+                new_section_lines.append(line)
+
+        # 5. Assembly
+        final_content = (before_marker + "\n".join(new_section_lines).strip() + "\n" + after_section).strip() + "\n"
+        
+        self.write_guest(user_id, final_content)
+        logger.info("Atomic profile reconstruction for user {}: {}", user_id, updates.keys())
 
     def write_guest(self, user_id: str, content: str) -> None:
         g_file = self._get_guest_file(user_id)
@@ -118,7 +222,7 @@ class MemoryStore:
         Guest sees global + their own specific guest file.
         """
         global_mem = self.read_global()
-        guest_mem = self.read_guest(current_user_id)
+        guest_mem, _ = self.read_guest(current_user_id)
         
         if is_master:
             return f"## Core Memory (Master View - Full Access)\n{global_mem}\n\n## Master's Private Memory Sandbox (Read-Write)\n{guest_mem}"
@@ -165,12 +269,11 @@ class MemoryStore:
                 return True
             logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
 
-        lines = []
         for m in old_messages:
             content = m.get("content")
             if not content:
                 continue
-            # Basic sanitization of history lines to focus on core chat
+            
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {content[:1000]}")
 
@@ -189,8 +292,11 @@ class MemoryStore:
 {chr(10).join(lines)}
 
 ## Instructions:
-1. **Identify NEW Facts & Profiles**: Extract any important facts, rules, or user preferences. 
-   - **Persona & Profiling**: Based on the conversation, update the user's personality traits (e.g., "heavy details", "impatient", "friendly") and communication habits.
+1. **Identify NEW Facts & Preferences**: Extract any important facts, project updates, or subjective preferences.
+   - **Persona Enrichment**: Enhance user profiling using the conversation context.
+   - **Relationship & Habits**: Observe their relationship with 'Gold Master' and their interaction style.
+   - **Communication Habits**: Note if they prefer brevity, are technical, or have specific taboos.
+   Note: Objective facts like Name, Title, and Dept are now handled automatically by the system and do not need extraction.
 2. **Global Update (Both Master & Guests)**: 
    - Is Master Mode (with highest authority): {'YES' if is_master else 'NO'}
    - If there are new universally shared truths (e.g. general technical facts, public news), write to `global_knowledge_update`.

@@ -175,6 +175,15 @@ class NanobotDingTalkHandler(CallbackHandler):
                 metadata["sender_name"] = sender_name
                 metadata["sender_id"] = sender_id
             
+            # Enrichment for immediate context
+            if sender_id in self.channel._user_info_cache:
+                details = self.channel._user_info_cache[sender_id]
+                metadata["sender_title"] = details.get("title", "")
+                metadata["sender_dept"] = details.get("dept", "")
+                metadata["sender_email"] = details.get("email", "")
+                metadata["sender_manager"] = details.get("manager_name", "")
+                metadata["sender_org_path"] = details.get("org_path", "")
+            
             logger.info(
                 "Received DingTalk message from {} ({}) [conv_type={}, conv_id={}]: {}",
                 sender_name, sender_id, conversation_type, conversation_id, content,
@@ -219,6 +228,8 @@ class DingTalkChannel(BaseChannel):
         self._background_tasks: set[asyncio.Task] = set()
         self._recent_replies: dict[str, list[str]] = {}
         self._directory: Any = None
+        self._user_info_cache: dict[str, dict[str, Any]] = {}
+        self._fetched_user_ids: set[str] = set() # Track IDs fetched in current session to avoid repeat calls
 
     async def start(self) -> None:
         """Start the DingTalk bot with Stream Mode."""

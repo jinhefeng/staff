@@ -13,7 +13,8 @@ def collect_monitor_data():
         "tickets": {"total_active": 0, "items": []},
         "heartbeat": {"tasks": []},
         "sessions": {"active_count": 0, "recent": []},
-        "deferred_tasks": []
+        "deferred_tasks": [],
+        "events": [] # System events from heartbeat.jsonl
     }
 
     # 1. Collect Tickets
@@ -84,6 +85,32 @@ def collect_monitor_data():
             data["sessions"]["recent"] = sessions[:10] # Top 10 recent
         except Exception as e:
             print(f"Error reading sessions: {e}")
+
+    # 4. Collect Heartbeat Events (Last 60 Notifications)
+    hb_jsonl_path = os.path.join(sessions_dir, "heartbeat.jsonl") if 'sessions_dir' in locals() else None
+    if hb_jsonl_path and os.path.exists(hb_jsonl_path):
+        try:
+            hb_events = []
+            with open(hb_jsonl_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        msg = json.loads(line)
+                        if msg.get("role") == "assistant":
+                            content = msg.get("content", "")
+                            is_silent = "[SILENT]" in content
+                            clean_content = content.replace("[SILENT]", "").strip()
+                            hb_events.append({
+                                "content": clean_content,
+                                "timestamp": msg.get("timestamp", ""),
+                                "is_silent": is_silent
+                            })
+                    except Exception:
+                        continue
+            # Keep last 60
+            data["events"] = hb_events[-60:]
+            data["events"].reverse() # Newest first
+        except Exception as e:
+            print(f"Error reading heartbeat events: {e}")
 
     # Output to data.json
     output_path = os.path.join(website_dir, "data.json")

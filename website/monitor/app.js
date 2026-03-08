@@ -15,7 +15,8 @@ const elements = {
     statDeferred: document.getElementById('stat-deferred'),
     ticketList: document.getElementById('ticket-list'),
     heartbeatList: document.getElementById('heartbeat-list'),
-    sessionList: document.getElementById('session-list')
+    sessionList: document.getElementById('session-list'),
+    eventList: document.getElementById('event-list')
 };
 
 function updateClock() {
@@ -85,6 +86,29 @@ function renderDashboard(data) {
         `;
         elements.sessionList.insertAdjacentHTML('beforeend', html);
     });
+
+    // Render Events
+    elements.eventList.innerHTML = data.events.length ? '' : '<div class="loading-placeholder">暂无系统动态</div>';
+    data.events.forEach(event => {
+        // Simple markdown strip for cleaner look in list
+        const cleanContent = event.content.replace(/\*\*/g, '').replace(/###/g, '').trim();
+        const html = `
+            <div class="event-item ${event.is_silent ? 'silent' : ''}">
+                <div class="event-meta">
+                    <span class="event-tag">${event.is_silent ? 'SILENT_GUARD' : 'NOTIFICATION'}</span>
+                    <span class="event-time">${formatDetailedTime(event.timestamp)}</span>
+                </div>
+                <div class="event-content">${escapeHTML(cleanContent)}</div>
+            </div>
+        `;
+        elements.eventList.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+function formatDetailedTime(isoString) {
+    if (!isoString) return '--:--:--';
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
 function formatTime(isoString) {
