@@ -220,14 +220,25 @@
 ## 阶段三十三：Sanitizer 性能优化 (Sanitizer Performance Optimization) [Needs Review]
 - [ ] **性能分析与优化 (Performance Phase)**
   - [ ] 解决 Sanitizer 在访客模式下响应时间过长的问题，优化审计预判与模型调用策略。
+  - [ ] 解决 Promise intent check tool 响应时间过长的问题，优化审计预判与模型调用策略。
 
-## 阶段三十四：上下文权重优化与“长短期记忆”协调 (Context Weight & Awareness) [Needs Review]
-- [ ] **现状诊断**：分析 Staff 对近距上下文理解能力差、交流“无感”的根本原因。
+## 阶段三十四：上下文权重优化与“长短期记忆”协调 (Context Weight & Awareness) [/]
+- [x] **基础设施：全量对话快照输出功能已实现** [x]
+- [/] **现状诊断**：分析 Staff 对近距上下文理解能力差、交流“无感”的根本原因。
+  - [x] 源码层审查：`nanobot/session/manager.py` 与 `nanobot/agent/context.py` [x]
+  - [x] 样本快照分析：`debug_20260308_174802_839303.json` 诊断 [x]
+  - [ ] 输出《上下文权重优化分析报告及实施方案》(ADR-034) [Needs Review]
 - [ ] **逻辑重构**：
-  - [ ] 检查 `nanobot/session/manager.py` 的上下文组装策略。
-  - [ ] 优化 Prompt 结构：强化“最近对话 > 历史背景”的注意力权重。
-  - [ ] 引入“滑动窗口 + 关键事实摘要”的混合增强模式，确保 Staff 即使在过载情况下也能维持对当前话题的精准把控。
-- [ ] **回归验收**：通过多轮连续测试，验证 Staff 对上下文依赖任务（如“代词指代”、“追问”）的理解准确度。
+  - [ ] **[B-1] System Prompt 动态化与瘦身**：
+    - [ ] 改造 `ContextBuilder` 支持 Conditional Bootstrap (按需加载 SOP)。
+    - [ ] 实现针对 Master/Guest 模式的差异化 Prompt 组件剔除。
+  - [ ] **[B-2] 消息结构压实与锚点强化**：
+    - [ ] 将 `Runtime Context` 合并至 User 消息末尾/首部（取决于注意力实验）。
+    - [ ] 在 `System` 底部增加“近期任务锚点 (Recent Context Anchor)”。
+  - [ ] **[B-3] 长短期记忆协调机制 (LRU-based Memory/Summary)**：
+    - [ ] 实现对过往 `tool_result` 的更激进摘要（非简单截断）。
+    - [ ] 引入“记忆相关性搜索”初步逻辑（Semantic Search or Keyword Pick）。
+- [ ] **回归验收**：通过“代词指代”、“跨度追问”等 Benchmark 验证优化效果。
 
 ## 阶段三十五：工作区路径重塑与认知对齐 (Workspace Path Alignment) [x]
 - [x] **路径纠偏**：彻底移除代码中对 `memory/tickets/` 等硬编码路径的引用。
@@ -256,8 +267,6 @@
   - [x] 校验 UI 展示效果和交互体验
   - [x] 编写 Walkthrough 文档
 
-
-
 ## 阶段三十八：人设设定优化与职能扩展 (Personality & Capability Expansion) [x]
 - [x] **方案定义 (Definition Phase)**
   - [x] 更新 `.agents/docs/interaction_spec.md` 和 `.agents/docs/functional_spec.md` 确立访客模式下的“力所能及”主动服务行为准则。
@@ -275,12 +284,11 @@
   - [ ] 获取用户确认并授权 (V3 Implementation Plan)
 - [ ] **功能实施 (Execution Phase)**
   - [ ] [MODIFY] `tickets.py`: 升级 Schema 支持三方元数据与细分状态 (PENDING, APPROVED, RUNNING, COMPLETED, FAILED, REJECTED)
-  - [ ] [MODIFY] `TicketManager`: 核心逻辑解耦，增加三方同步通知引擎
-  - [ ] [MODIFY] `ResolveTicketTool`: 实现多态审批与反馈，不再仅依赖特定标签
+  - [ ] [TicketManager]: 核心逻辑解耦，增加三方同步通知引擎
+  - [ ] [ResolveTicketTool]: 实现多态审批与反馈，不再仅依赖特定标签
   - [ ] [NEW] `RejectTicketTool`: 增加驳回功能及配套通知
-  - [ ] [MODIFY] `HeartbeatService`: 闭环认领状态监控与执行反馈
+  - [ ] [HeartbeatService]: 闭环认领状态监控与执行反馈
 - [ ] **验证回归 (Verification Phase)**
   - [ ] 自动化测试验证三方通知触发器
   - [ ] 手动闭环演练: 访客请求 -> Master 审批 -> Staff 执行 -> 三方自动同步
   - [ ] 编写 V3 验收 Walkthrough 文档
-

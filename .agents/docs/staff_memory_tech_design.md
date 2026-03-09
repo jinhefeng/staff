@@ -66,14 +66,19 @@ trust_score: 50
 - `update_md_field(user_id, updates)` — 【加固】原子化画像更新：基于特定锚点（### 🎭 基本特质与履历）的全段落重绘技术，通过 `(?m)` 模式锁定行首，物理清理脏行。
 - `consolidate(session, provider, model, is_master, current_user_id)` — 记忆巩固。
 
-#### D. 记忆治理之“提炼-合并-守卫”流程 (Phase 27)
-1. **静默提炼 (Silent Extraction)**：LLM 仅提取新发现的事实。如果没有新信息，返回特殊标识。
-2. **权重合并 (Weighted Merge)**：要求 LLM 以新事实为最高权重合并回旧文件。新事实 > 旧事实（如果冲突）。
-3. **压缩 (Compaction)**：对 Guest 记忆执行强制瘦身，控制在 2000 字符以内，防止稀释 Attention。
-4. **物理读写守卫 (Write Protection)**：
+#### D. 记忆治理之“提炼-合并-守卫”流程 (Phase 27 / Scheme N 加固)
+1. **稳健分片 (Scheme N)**：
+    - 抛弃基于数组下标的脆弱计算，改为在全量消息中查找 `last_consolidated_id` 作为起点。
+    - 引入 `sessionSafeBuffer`：从列表末尾向上扣除 20 条消息作为“记忆安全区”，仅对安全区之前的积压消息执行提炼，确保 LLM 维持精准的短期语境。
+2. **静默提炼 (Silent Extraction)**：LLM 仅提取新发现的事实。
+3. **强制游标推进 (Mandatory Advance)**：若 LLM 未返回任何工具调用（无意义对话），系统依然会将 `last_consolidated_id` 推进至当前切片的末尾，防止该片段在下一轮被重复加载而形成死循环。
+4. **权重合并 (Weighted Merge)**：要求 LLM 以新事实为最高权重合并回旧文件。新事实 > 旧事实（如果冲突）。
+5. **压缩 (Compaction)**：对 Guest 记忆执行强制瘦身，控制在 2000 字符以内。
+6. **物理读写守卫 (Write Protection)**：
     - 拦截非法值（如 `"None"`, `"null"` 等）。
     - 校验 YAML 历史标签（如 TrustScore 必须被保留）。
-    - 监控存储缩放率：防止因模型返回受限导致的全量数据覆盖。
+    - 正则自动修复：若提炼结果丢失 YAML Header，强制从 `current_guest` 中提取并恢复 TrustScore 等关键指标。
+    - 监控存储缩放率：防止大规模数据覆盖导致的意外“失忆”。
 
 ## 3. 潜意识反思引擎 (Phase 20)
 

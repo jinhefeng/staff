@@ -366,6 +366,8 @@ def gateway(
         session_background_max_messages=config.agents.defaults.session_background_max_messages,
         session_background_clear_to_size=config.agents.defaults.session_background_clear_to_size,
         session_background_cleanup_days=config.agents.defaults.session_background_cleanup_days,
+        session_safe_buffer=config.agents.defaults.session_safe_buffer,
+        debug_context=config.agents.defaults.debug_context,
         pre_process_hook=sync_dingtalk_profile,
     )
     
@@ -589,6 +591,7 @@ def agent(
         session_background_max_messages=config.agents.defaults.session_background_max_messages,
         session_background_clear_to_size=config.agents.defaults.session_background_clear_to_size,
         session_background_cleanup_days=config.agents.defaults.session_background_cleanup_days,
+        debug_context=config.agents.defaults.debug_context,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on

@@ -7,6 +7,7 @@ import json
 import re
 import time
 import weakref
+from datetime import datetime
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -76,6 +77,8 @@ class AgentLoop:
         session_background_max_messages: int = 100,
         session_background_clear_to_size: int = 50,
         session_background_cleanup_days: int = 15,
+        session_safe_buffer: int = 30,
+        debug_context: bool = False,
         pre_process_hook: Callable[[InboundMessage], Awaitable[None]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -99,6 +102,8 @@ class AgentLoop:
         self.session_background_max_messages = session_background_max_messages
         self.session_background_clear_to_size = session_background_clear_to_size
         self.session_background_cleanup_days = session_background_cleanup_days
+        self.session_safe_buffer = session_safe_buffer
+        self.debug_context = debug_context
         self._pre_process_hook = pre_process_hook
 
         self.sessions = session_manager or SessionManager(workspace)
@@ -350,6 +355,25 @@ class AgentLoop:
             
             if messages:
                 logger.debug("▶️ [LLM Input] To Model {}:\n{}", self.model, json.dumps(messages[-1:], ensure_ascii=False, indent=2))
+                
+                # Full context debugging (Phase 34)
+                if hasattr(self, "debug_context") and self.debug_context:
+                    try:
+                        debug_dir = self.workspace / "sessions" / "debug"
+                        debug_dir.mkdir(parents=True, exist_ok=True)
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                        # We try to get session key from current tools context or use general tag
+                        debug_file = debug_dir / f"debug_{ts}.json"
+                        with open(debug_file, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "model": self.model,
+                                "iteration": iteration,
+                                "timestamp": datetime.now().isoformat(),
+                                "messages": messages
+                            }, f, ensure_ascii=False, indent=2)
+                        logger.info("Full conversation context exported to {}", debug_file)
+                    except Exception as e:
+                        logger.warning("Failed to export debug context: {}", e)
                 
             response = await self.provider.chat(
                 messages=messages,
@@ -723,7 +747,14 @@ class AgentLoop:
             self._consolidating.add(session.key)
             try:
                 async with lock:
-                    snapshot = session.messages[session.last_consolidated:]
+                    # FIX: Safely slice using modern anchor ID instead of obsolete numeric index.
+                    start_idx = 0
+                    if session.last_consolidated_id:
+                        for i, m in enumerate(session.messages):
+                            if m.get("metadata", {}).get("dingtalk_msg_id") == session.last_consolidated_id:
+                                start_idx = i + 1
+                                break
+                    snapshot = session.messages[start_idx:]
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
@@ -750,8 +781,36 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content=f"🐈 {self.context.agent_name} commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
 
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
+        # Scheme N & O: Robust ID-based accumulation check
+        # Index(last_consolidated_id) splits history from "now"
+        anchor_idx = -1
+        if session.last_consolidated_id:
+            for i, m in enumerate(session.messages):
+                if m.get("metadata", {}).get("dingtalk_msg_id") == session.last_consolidated_id:
+                    anchor_idx = i
+                    break
+
+        # Gross accumulation since last consolidation
+        accumulated = len(session.messages) - (anchor_idx + 1)
+        
+        # Net accumulation (excluding logic-protected Safe Buffer)
+        # This prevents triggering when there's nothing harvestable after buffer reservation
+        safe_buffer = getattr(self, "session_safe_buffer", 0)
+        session.session_safe_buffer = safe_buffer  # Scheme N: Sync the attribute for MemoryStore
+        net_unconsolidated = accumulated - safe_buffer
+        
+        # [DEBUG LOG] Pure ID-based check
+        logger.info("Consolidation check for {}: anchor_id={}, anchor_idx={}, net_sum={}, buffer={}, window={}", 
+                    session.key, session.last_consolidated_id, anchor_idx, net_unconsolidated, safe_buffer, self.memory_window)
+
+        # Identify relationship for specialized memory rules
+        is_master_context = False
+        if self.channels_config and msg.channel in self.channels_config:
+            chan_cfg = self.channels_config[msg.channel]
+            if hasattr(chan_cfg, "master_ids") and msg.sender_id in chan_cfg.master_ids:
+                is_master_context = True
+
+        if (net_unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
 
@@ -848,6 +907,11 @@ class AgentLoop:
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
+
+        # Persistence: Save assistant response and tool outputs to session
+        # The new ID-based anchoring handles alignment automatically.
+        self._save_turn(session, all_msgs, len(initial_messages))
+        self.sessions.save(session)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -966,8 +1030,10 @@ class AgentLoop:
                 logger.info("Created initial guest memory for {} ({})", sender_name, msg.sender_id)
 
         if not is_msg_tool:
-             preview = final_content[:150] + "..." if len(final_content) > 150 else final_content
              logger.info("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        
+        # Scheme N: Robust Persistence (Always save after processing)
+        self.sessions.save(session)
 
         return None  # Message already published in Scheme D
 
@@ -1006,8 +1072,9 @@ class AgentLoop:
                         session.key, len(session.messages), limit, to_remove)
             # Remove oldest messages
             session.messages = session.messages[to_remove:]
-            # Core Fix: Shift the consolidation cursor leftwards to prevent consolidate starvation
-            session.last_consolidated = max(0, session.last_consolidated - to_remove)
+            # Core Fix: No longer need to manually shift last_consolidated.
+            # Shift existing pointers and record the new ID anchor (Scheme N: Robust Slicing)
+            # MemoryStore.consolidate has already updated the session object in memory.
             return True
         return False
 
@@ -1043,6 +1110,11 @@ class AgentLoop:
             current_user_id=current_user_id,
             is_master=is_master
         )
+        
+        if success:
+            # Scheme N: Crucial - Persistence is required after header/anchor update
+            self.sessions.save(session)
+            logger.info("Memory consolidation: Session state persisted for {}", session.key)
 
         if success and not is_master_identity and current_user_id != "Unknown" and current_user_id != "user":
             async def _background_reflect():

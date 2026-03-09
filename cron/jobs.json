@@ -1,4 +1,33 @@
 {
   "version": 1,
-  "jobs": []
+  "jobs": [
+    {
+      "id": "22ea26af",
+      "name": "金总，今日早餐建议：一颗红富士，搭配温水。",
+      "enabled": true,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1773097200000,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "金总，今日早餐建议：一颗红富士，搭配温水。",
+        "deliver": true,
+        "channel": "dingtalk",
+        "to": "014224562537153949"
+      },
+      "state": {
+        "nextRunAtMs": 1773097200000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null
+      },
+      "createdAtMs": 1773076311408,
+      "updatedAtMs": 1773076311408,
+      "deleteAfterRun": true
+    }
+  ]
 }

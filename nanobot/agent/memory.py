@@ -259,16 +259,40 @@ class MemoryStore:
             keep_count = 0
             logger.info("Memory consolidation (archive_all): {} messages", len(session.messages))
         else:
-            keep_count = memory_window // 2
-            if len(session.messages) <= keep_count:
-                return True
-            if len(session.messages) - session.last_consolidated <= 0:
-                return True
-            old_messages = session.messages[session.last_consolidated:-keep_count]
-            if not old_messages:
-                return True
-            logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
+            # Scheme N: Robust Anchor Slicing (Configurable Safe Buffer)
+            # Scheme N: Robust ID-based slicing
+            # 1. Find the anchor index in current messages
+            anchor_idx = -1
+            if session.last_consolidated_id:
+                for i, m in enumerate(session.messages):
+                    if m.get("metadata", {}).get("dingtalk_msg_id") == session.last_consolidated_id:
+                        anchor_idx = i
+                        break
+                        
+            # 2. Slice messages to consolidate (excluding what's already done and what's in Safe Buffer)
+            # Get safe_buffer from the session object, which was correctly synced from AgentLoop
+            safe_buffer = getattr(session, "session_safe_buffer", 20)
+            
+            # Use the actual list length to guard against over-slicing
+            # end_idx is the index up to which we archive. 
+            # We must keep 'safe_buffer' messages at the end.
+            end_idx = len(session.messages) - safe_buffer
+            
+            logger.info("Memory consolidation slicing: anchor_idx={}, end_idx={}, total={}, buffer={}, window={}", 
+                        anchor_idx, end_idx, len(session.messages), safe_buffer, memory_window)
 
+            if end_idx <= anchor_idx + 1:
+                logger.info("Memory consolidation: No harvestable messages after anchor {} (index {}) with buffer {} reserved. Skipping.", 
+                            session.last_consolidated_id, anchor_idx, safe_buffer)
+                return False
+
+            old_messages = session.messages[anchor_idx + 1 : end_idx]
+            if not old_messages:
+                return False
+            logger.info("Memory consolidation: {} to consolidate (idx {} to {}), {} buffer reserved", 
+                        len(old_messages), anchor_idx + 1, end_idx, safe_buffer)
+
+        lines = [] # Initialize lines here, as it's used in both branches
         for m in old_messages:
             content = m.get("content")
             if not content:
@@ -278,7 +302,7 @@ class MemoryStore:
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {content[:1000]}")
 
         current_global = self.read_global()
-        current_guest = self.read_guest(current_user_id)
+        current_guest, _ = self.read_guest(current_user_id)
         
         prompt = f"""Process the following conversation snippet and update the agent's memory systems.
 
@@ -331,73 +355,82 @@ class MemoryStore:
             )
 
             if not response.has_tool_calls:
-                logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
-                return False
+                # 修复 V8：当 LLM 认为全是无意义水聊而不调用工具时，
+                # 必须强行排空（ACK）并推进游标返回 True，否则会产生永远停在此处的算力黑洞死锁。
+                logger.warning("Memory consolidation: LLM found no valuable context to save, bypassing extraction but advancing anchor index.")
+                # We skip to the final update block to advance the cursor.
+            else:
+                args = response.tool_calls[0].arguments
+                if isinstance(args, str):
+                    args = json.loads(args)
+                if not isinstance(args, dict):
+                    # 如果参数彻底损坏，这种极端情况允许重试
+                    return False
 
-            args = response.tool_calls[0].arguments
-            if isinstance(args, str):
-                args = json.loads(args)
-            if not isinstance(args, dict):
-                return False
+                # 1. Update History.md (Log)
+                if entry := args.get("history_entry"):
+                    if not isinstance(entry, str):
+                        entry = json.dumps(entry, ensure_ascii=False)
+                    self.append_history(entry)
+                    
+                # 2. Update Guest Memory (Compacted)
+                if update := args.get("guest_memory_update"):
+                    if not isinstance(update, str):
+                        update = json.dumps(update, ensure_ascii=False)
+                    
+                    # Auto-recovery: If TrustScore header is missing but present in current_guest,补全它
+                    import re
+                    old_header_match = re.match(r'^(---\n.*?\n---)', current_guest, re.DOTALL)
+                    new_header_match = re.match(r'^(---\n.*?\n---)', update, re.DOTALL)
+                    
+                    if old_header_match and not new_header_match:
+                        logger.info("Memory consolidation: Auto-restoring TrustScore header for {}", current_user_id)
+                        update = f"{old_header_match.group(1)}\n{update}"
 
-            # 1. Update History.md (Log)
-            if entry := args.get("history_entry"):
-                if not isinstance(entry, str):
-                    entry = json.dumps(entry, ensure_ascii=False)
-                self.append_history(entry)
-                
-            # 2. Update Guest Memory (Compacted)
-            if update := args.get("guest_memory_update"):
-                if not isinstance(update, str):
-                    update = json.dumps(update, ensure_ascii=False)
-                
-                # Auto-recovery: If TrustScore header is missing but present in current_guest,补全它
-                import re
-                old_header_match = re.match(r'^(---\n.*?\n---)', current_guest, re.DOTALL)
-                new_header_match = re.match(r'^(---\n.*?\n---)', update, re.DOTALL)
-                
-                if old_header_match and not new_header_match:
-                    logger.info("Memory consolidation: Auto-restoring TrustScore header for {}", current_user_id)
-                    update = f"{old_header_match.group(1)}\n{update}"
+                    # Defensive check: Ensure it's not a placeholder
+                    if self._is_valid_memory(update) and update != current_guest:
+                        # Final check: Even after recovery, did it lose the header?
+                        if "TrustScore" in current_guest and "TrustScore" not in update:
+                            logger.warning("Memory consolidation: Update lost TrustScore header, rejecting")
+                        else:
+                            self.write_guest(current_user_id, update)
 
-                # Defensive check: Ensure it's not a placeholder
-                if self._is_valid_memory(update) and update != current_guest:
-                    # Final check: Even after recovery, did it lose the header?
-                    if "TrustScore" in current_guest and "TrustScore" not in update:
-                        logger.warning("Memory consolidation: Update lost TrustScore header, rejecting")
-                    else:
-                        self.write_guest(current_user_id, update)
-
-            # 3. Update Global Knowledge (Conflict Resolution & Double-Layer)
-            if global_upd := args.get("global_knowledge_update"):
-                if not isinstance(global_upd, str):
-                    global_upd = json.dumps(global_upd, ensure_ascii=False)
-                
-                # Physical Guard: Only overwrite if it's valid and informative
-                if self._is_valid_memory(global_upd) and global_upd != current_global:
-                    # Safety check
-                    if len(current_global) > 200 and len(global_upd) < 50:
-                         logger.error("Memory consolidation: Detected suspicious global memory shrinkage, blocking update")
-                    else:
-                        # Extra security validation: If not master, forbid tampering with section 1.
-                        # We use regex to extract the content of Section 1 in old and new global.
-                        if not is_master:
-                            import re
-                            def _extract_section_1(text):
-                                match = re.search(r'(###.*1\..*?真相)(.*?)(###.*2\..*?真相|$)', text, re.DOTALL)
-                                return match.group(2).strip() if match else ""
-                            
-                            old_s1 = _extract_section_1(current_global)
-                            new_s1 = _extract_section_1(global_upd)
-                            if old_s1 and new_s1 and old_s1 != new_s1:
-                                logger.warning("Consolidate Access Denied: Guest/Group chat attempted to modify Master Absolute Truths. Rejecting.")
+                # 3. Update Global Knowledge (Conflict Resolution & Double-Layer)
+                if global_upd := args.get("global_knowledge_update"):
+                    if not isinstance(global_upd, str):
+                        global_upd = json.dumps(global_upd, ensure_ascii=False)
+                    
+                    # Physical Guard: Only overwrite if it's valid and informative
+                    if self._is_valid_memory(global_upd) and global_upd != current_global:
+                        # Safety check
+                        if len(current_global) > 200 and len(global_upd) < 50:
+                             logger.error("Memory consolidation: Detected suspicious global memory shrinkage, blocking update")
+                        else:
+                            # Extra security validation: If not master, forbid tampering with section 1.
+                            # We use regex to extract the content of Section 1 in old and new global.
+                            if not is_master:
+                                import re
+                                def _extract_section_1(text):
+                                    match = re.search(r'(###.*1\..*?真相)(.*?)(###.*2\..*?真相|$)', text, re.DOTALL)
+                                    return match.group(2).strip() if match else ""
+                                
+                                old_s1 = _extract_section_1(current_global)
+                                new_s1 = _extract_section_1(global_upd)
+                                if old_s1 and new_s1 and old_s1 != new_s1:
+                                    logger.warning("Consolidate Access Denied: Guest/Group chat attempted to modify Master Absolute Truths. Rejecting.")
+                                else:
+                                    self.write_global(global_upd)
                             else:
                                 self.write_global(global_upd)
-                        else:
-                            self.write_global(global_upd)
 
-            session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
-            logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
+                # Final Update: Shift existing pointers and record the new ID anchor (Scheme N: Robust Slicing)
+            if old_messages:
+                last_msg_id = old_messages[-1].get("metadata", {}).get("dingtalk_msg_id")
+                if last_msg_id:
+                    session.last_consolidated_id = last_msg_id
+            
+            logger.info("Memory consolidation done: {} messages consolidated, last_consolidated_id={}", 
+                        len(old_messages), session.last_consolidated_id)
             return True
         except Exception:
             logger.exception("Memory consolidation failed")

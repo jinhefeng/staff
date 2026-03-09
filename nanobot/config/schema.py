@@ -252,6 +252,15 @@ class AgentDefaults(Base):
     )
 
     reasoning_effort: str | None = Field(default=None, description="推理强度 (Reasoning effort: low/medium/high)")
+    debug_context: bool = Field(default=False, description="是否输出全量对话快照到文件 (Whether to output full conversation snapshots to files)")
+    
+    # 归档安全缓冲区 (Consolidation Safe Buffer)
+    session_safe_buffer: int = Field(
+        default=30, 
+        description="归档时强制保留的原始消息条数，用于确保 LLM 始终拥有即时语境 (Number of recent messages NOT consolidated, kept as active context)"
+    )
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
 
 
 class AgentsConfig(Base):

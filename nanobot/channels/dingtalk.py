@@ -55,6 +55,21 @@ class NanobotDingTalkHandler(CallbackHandler):
             
             # Deep Debug: Print full message data and internal attributes
             logger.debug("DEBUG: DingTalk Inbound message.data: {}", json.dumps(message.data, ensure_ascii=False, indent=2))
+            
+            # [Scheme L: Log Capture] 原原本本记录完整 CallbackMessage 对象
+            try:
+                raw_payload = {
+                    "topic": getattr(message, "topic", "unknown"),
+                    "messageId": getattr(message, "message_id", "unknown"),
+                    "extensions": getattr(message, "extensions", {}),
+                    "data": message.data
+                }
+                debug_file = Path("/Users/jinhefeng/Dev/staff/workspace/sessions/debug/raw_inbound.json")
+                debug_file.write_text(json.dumps(raw_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                logger.info("Captured raw DingTalk message to {}", debug_file)
+            except Exception as log_err:
+                logger.warning("Failed to capture raw message: {}", log_err)
+
             try:
                 # Log all available attributes of the message object to see if markers are hidden outside .data
                 attrs = {name: str(getattr(message, name)) for name in dir(message) if not name.startswith('_') and not callable(getattr(message, name))}

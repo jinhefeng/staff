@@ -29,7 +29,8 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    last_consolidated: int = 0  # Number of messages already consolidated to files
+    last_consolidated_id: str | None = None
+    session_safe_buffer: int = 20  # Scheme N: Reserved raw context length
     
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -42,10 +43,31 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
     
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
-        unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
+    def get_history(self, max_messages: int = 100) -> list[dict[str, Any]]:
+        """
+        Get recent history for the LLM. 
+        Uses last_consolidated_id as a robust anchor (Scheme N: Robust Slicing).
+        """
+        # 1. Start from the anchor ID if possible
+        start_idx = 0
+        if self.last_consolidated_id:
+            for i, msg in enumerate(self.messages):
+                if msg.get("metadata", {}).get("dingtalk_msg_id") == self.last_consolidated_id:
+                    start_idx = i + 1
+                    break
+            else:
+                # Anchor ID lost (likely due to 80->40 physical pruning)
+                # Fallback: Treat everything remaining as unconsolidated
+                logger.info("Session {}: Anchor ID {} not found, providing all remaining messages.", 
+                            self.key, self.last_consolidated_id)
+        else:
+            # Legacy fallback for sessions without ID anchors
+            logger.info("Session {}: Legacy session without ID anchor. Using start_idx=0.",
+                        self.key)
+            start_idx = 0
+
+        history = self.messages[start_idx:]
+        sliced = history[-max_messages:]
 
         # Drop leading non-user messages to avoid orphaned tool_result blocks
         for i, m in enumerate(sliced):
@@ -77,11 +99,9 @@ class Session:
             if m.get("metadata", {}).get(key) == value:
                 return m
         return None
-    
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
-        self.last_consolidated = 0
         self.updated_at = datetime.now()
 
 
@@ -149,7 +169,7 @@ class SessionManager:
             messages = []
             metadata = {}
             created_at = None
-            last_consolidated = 0
+            last_consolidated_id = None
 
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -162,7 +182,7 @@ class SessionManager:
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-                        last_consolidated = data.get("last_consolidated", 0)
+                        last_consolidated_id = data.get("last_consolidated_id")
                     else:
                         messages.append(data)
 
@@ -171,7 +191,7 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated_id=last_consolidated_id
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -180,7 +200,7 @@ class SessionManager:
     def save(self, session: Session) -> None:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
-
+        
         with open(path, "w", encoding="utf-8") as f:
             metadata_line = {
                 "_type": "metadata",
@@ -188,7 +208,7 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated_id": session.last_consolidated_id
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
@@ -199,6 +219,7 @@ class SessionManager:
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+
 
     def cleanup_background_sessions(self, days: int) -> int:
         """
