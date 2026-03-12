@@ -125,15 +125,11 @@ class SkillsLoader:
         lines = ["<skills>"]
         for s in all_skills:
             name = escape_xml(s["name"])
-            path = s["path"]
             desc = escape_xml(self._get_skill_description(s["name"]))
-            skill_meta = self._get_skill_meta(s["name"])
-            available = self._check_requirements(skill_meta)
             
             lines.append(f"  <skill available=\"true\">")
             lines.append(f"    <name>{name}</name>")
             lines.append(f"    <description>{desc}</description>")
-            lines.append(f"    <location>{path}</location>")
             lines.append(f"  </skill>")
         lines.append("</skills>")
         

@@ -58,8 +58,9 @@ class LiteLLMProvider(LLMProvider):
         if api_base:
             litellm.api_base = api_base
         
-        # Disable LiteLLM logging noise
-        litellm.suppress_debug_info = True
+        # Disable LiteLLM logging noise (Enabled for diagnosis)
+        litellm.set_verbose = True
+        litellm.suppress_debug_info = False
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
     
@@ -235,8 +236,8 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        # Default safety timeout
-        kwargs["timeout"] = timeout or 180.0
+        # Default safety timeout (Shortened for diagnosis)
+        kwargs["timeout"] = timeout or 120.0
         
         try:
             response = await acompletion(**kwargs)

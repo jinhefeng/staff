@@ -1,7 +1,6 @@
 ---
 name: memory
 description: Federated memory system (Global + Isolated Guest Sandboxes).
-always: true
 ---
 
 # Memory

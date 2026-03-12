@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-12T10:18:19.855651",
+  "last_updated": "2026-03-12T16:28:12.031239",
   "tickets": {
     "total_active": 2,
     "items": [
@@ -25,8 +25,8 @@
     "recent": [
       {
         "name": "dingtalk_014224562537153949.jsonl",
-        "last_modified": "2026-03-12T10:16:35.513624",
-        "msg_count": 80
+        "last_modified": "2026-03-12T16:21:56.501100",
+        "msg_count": 66
       },
       {
         "name": "014224562537153949.jsonl",

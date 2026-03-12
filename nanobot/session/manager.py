@@ -87,7 +87,7 @@ class Session:
                 content = content[:1000] + "\n\n[... Content truncated for brevity by Staff context manager ...]"
 
             entry: dict[str, Any] = {"role": role, "content": content}
-            for k in ("tool_calls", "tool_call_id", "name"):
+            for k in ("tool_calls", "tool_call_id", "name", "timestamp"):
                 if k in m:
                     entry[k] = m[k]
             out.append(entry)

@@ -374,5 +374,12 @@
     - [ ] **Task 2.3: 风格验证与回归测试**
 - [ ] **第三阶段：动态裁剪与分层控制 (Hard)** [ ]
     - [ ] **Task 3.1: Master 模式 Prompt 动态精简**
-    - [ ] **Task 3.2: 实施历史消息瘦身 (GC 优化)**
+    - [x] **Task 3.2: 实施历史消息瘦身与时间感知同步** [x]
+        - [x] 开发 `relative_time` 标签注入逻辑并修复 ISO 解析 Bug。
+        - [x] 优化 `AgentLoop` I/O 锁粒度，移除并发存盘死锁点。
     - [ ] **Task 3.3: 核心消息摘要压缩机制**
+
+## 阶段四十六：设计变更提取与文档同步 (Extract-Design-Change) [x]
+- [x] 提取“时间感知标签”设计逻辑至 `session_management_spec.md`。
+- [x] 提取“I/O 锁优化与 Provider 超时”逻辑至 `response_mechanism.md`。
+- [x] 同步更新 `task.md` 进度。

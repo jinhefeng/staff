@@ -1052,9 +1052,6 @@ class AgentLoop:
         if not is_msg_tool:
              logger.info("🤖 Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         
-        # Scheme N: Robust Persistence (Always save after processing)
-        self.sessions.save(session)
-
         return None  # Message already published in Scheme D
 
     def _clean_metadata(self, metadata: dict, is_group: bool) -> dict:
