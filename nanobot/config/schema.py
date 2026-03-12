@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Any
 
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
@@ -281,6 +281,7 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     model: str | None = None  # Model bound to this provider (e.g. "qwen/qwq-32b")
     tool_use: bool = True  # Set to false for models that don't support function calling
+    extra_body: dict[str, Any] | None = None  # Extra body parameters for the API request
 
 
 class ProvidersConfig(Base):

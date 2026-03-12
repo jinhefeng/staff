@@ -41,8 +41,10 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        config: Any = None,
     ):
         super().__init__(api_key, api_base)
+        self._config = config
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         
@@ -58,9 +60,13 @@ class LiteLLMProvider(LLMProvider):
         if api_base:
             litellm.api_base = api_base
         
-        # Disable LiteLLM logging noise (Enabled for diagnosis)
-        litellm.set_verbose = True
-        litellm.suppress_debug_info = False
+        # Disable LiteLLM logging noise by default.
+        # To enable, set e.g. os.environ['LITELLM_LOG'] = 'DEBUG'
+        if os.environ.get("LITELLM_LOG"):
+            litellm.set_verbose = False  # Derived from env if needed
+        else:
+            litellm.set_verbose = False
+            litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
     
@@ -235,6 +241,13 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        
+        # Pass extra body parameters if configured for this provider
+        config = getattr(self, "_config", None)
+        if config and hasattr(config, "extra_body") and config.extra_body:
+            kwargs["extra_body"] = config.extra_body
+            # When extra_body is used, we often want to drop generic params that might conflict
+            kwargs["drop_params"] = True
         
         # Default safety timeout (Shortened for diagnosis)
         kwargs["timeout"] = timeout or 120.0

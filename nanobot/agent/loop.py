@@ -1134,10 +1134,12 @@ class AgentLoop:
             logger.info("Memory consolidation: Session state persisted for {}", session.key)
 
         if success and not is_master_identity and current_user_id != "Unknown" and current_user_id != "user":
-            async def _background_reflect():
+            async def _background_tasks():
                 try:
-                    from nanobot.agent.reflection import ReflectionAgent
                     mem_store = MemoryStore(self.workspace)
+                    
+                    # 1. Background Reflection (Existing)
+                    from nanobot.agent.reflection import ReflectionAgent
                     agent = ReflectionAgent(mem_store, self.provider, self.model)
                     alert = await agent.reflect_on_guest(current_user_id)
                     
@@ -1145,17 +1147,29 @@ class AgentLoop:
                         if self.channels_config and getattr(self.channels_config, 'dingtalk', None):
                             dt_cfg = getattr(self.channels_config, 'dingtalk')
                             if hasattr(dt_cfg, 'master_ids') and getattr(dt_cfg, 'master_ids', None):
-                                from nanobot.models import OutboundMessage
+                                from nanobot.bus.events import OutboundMessage
                                 for m_id in dt_cfg.master_ids:
                                     logger.info("Forwarding reflection alert to master {}", m_id)
                                     await self.bus.publish_outbound(OutboundMessage(
                                         channel="dingtalk", chat_id=m_id,
                                         content=f"⚠️ {alert}"
                                     ))
-                except Exception:
-                    logger.exception("Background reflection failed")
 
-            _task = asyncio.create_task(_background_reflect())
+                    # 2. Dream Purification: Generate/Update Profile Snapshot (Snapshot Update)
+                    # This ensures the 'Cold-Boot' summary is always fresh.
+                    await mem_store.purify_guest_memory(current_user_id, self.provider, self.model)
+
+                    # 3. Memory Pruning: Deep refine the physical file (Selective Cleanup)
+                    # Trigger only if file is bulky (> 2KB) or after a certain conversation depth.
+                    guest_file = mem_store._get_guest_file(current_user_id)
+                    if guest_file.exists() and guest_file.stat().st_size > 2048:
+                        logger.info("Triggering deep memory pruning for heavy guest archive: {}", current_user_id)
+                        await mem_store.prune_guest_memory(current_user_id, self.provider, self.model)
+
+                except Exception:
+                    logger.exception("Background memory tasks (Reflect/Purify/Prune) failed")
+
+            _task = asyncio.create_task(_background_tasks())
             if hasattr(self, '_consolidation_tasks'):
                 self._consolidation_tasks.add(_task)
 

@@ -238,6 +238,7 @@ def _make_provider(config: Config, provider_config: ProviderConfig | None, provi
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        config=p,
     )
 
 

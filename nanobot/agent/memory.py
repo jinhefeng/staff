@@ -65,6 +65,26 @@ _MERGE_MEMORY_TOOL = [
     }
 ]
 
+_PRUNE_MEMORY_TOOL = [
+    {
+        "type": "function",
+        "function": {
+            "name": "prune_memory",
+            "description": "Prune and refine bulky memory documentation by deduplicating facts and consolidating labels.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "refined_content": {
+                        "type": "string",
+                        "description": "The complete, refined, and deduped markdown content for the guest memory file including YAML header.",
+                    }
+                },
+                "required": ["refined_content"],
+            },
+        },
+    }
+]
+
 
 class MemoryStore:
     """Federated memory: core/global.md (long-term facts) + guests/{user_id}.md (isolated sandbox + trust)."""
@@ -208,7 +228,7 @@ class MemoryStore:
         return f"## Core Global Knowledge (Read-Only)\n{global_mem}\n\n## Your Exclusive Memory Sandbox (Read-Write){tag}\n{guest_mem}"
 
     async def purify_guest_memory(self, user_id: str, provider, model: str) -> bool:
-        """Nightly Purify: Compress the bulky guest.md into a highly distilled profile summary."""
+        """Nightly Purify: Compress the bulky guest.md into a highly distilled profile summary snapshot."""
         import re
         guest_mem, exists = self.read_guest(user_id)
         if not exists or len(guest_mem) < 300:
@@ -225,7 +245,7 @@ Focus strictly on:
 
 CRITICAL RULES:
 - Reply with ONLY the Markdown content. Do NOT wrap in ```markdown blocks if possible.
-- The output MUST fit within a single glance.
+- The output MUST fit within a single glance and represent the "Cold-Boot" state of this person.
 
 ## Source Document
 {guest_mem}'''
@@ -236,7 +256,7 @@ CRITICAL RULES:
                 model=model,
                 temperature=0.1
             )
-            summary_content = resp.content.strip()
+            summary_content = resp.content.strip() if resp.content else ""
             
             # Strip wrapper
             if summary_content.startswith("```markdown"):
@@ -254,6 +274,70 @@ CRITICAL RULES:
             logger.error("Failed to purify guest memory for {}: {}", user_id, e)
             return False
 
+    async def prune_guest_memory(self, user_id: str, provider: LLMProvider, model: str) -> bool:
+        """Memory Pruning: Deeply refine and deduplicate the guest.md file, directly overwriting it.
+        Focuses on merging redundant labels [CAUTION], [STRATEGY] and discarding chitchat.
+        """
+        guest_mem, exists = self.read_guest(user_id)
+        if not exists:
+            return False
+
+        prompt = f"""You are the Master Memory Pruner. Your goal is to refine and compact a bulky guest memory file while ensuring NO information loss for critical rules.
+
+## Current Memory Content
+{guest_mem}
+
+## Refining Instructions
+1. **Deduplication & Merging (CRITICAL)**: 
+   - Scan all entries. If multiple entries (regardless of their current labels) describe the same core fact, taboo, or preference, you MUST merge them into a single, comprehensive point.
+   - For `[CAUTION]` (Taboos/Red Flags) and `[STRATEGY]` (Instructions from Master), consolidate redundant warnings into a single, high-impact instruction.
+2. **Fact Refining**: For `[NEUTRAL]` facts, keep only the essence. Discard transient conversational context (e.g., 'the user said hello'). 
+3. **Weighting**: If entries conflict, prioritize the information that appears to be more recent or specific.
+4. **Formatting**: Maintain the 4-section Markdown structure (Persona, Preferences, Tailored Narrative, Recent Status). ALWAYS preserve the exact YAML header including TrustScore.
+
+## Goal
+Reduce the total length of the document by at least 40% while making the remaining rules sharper and more coherent.
+"""
+        try:
+            resp = await provider.chat(
+                messages=[
+                    {"role": "system", "content": "You refine agent memory via deduplication and consolidation. You are meticulous and never lose critical warnings."},
+                    {"role": "user", "content": prompt}
+                ],
+                tools=_PRUNE_MEMORY_TOOL,
+                model=model,
+                temperature=0.1
+            )
+
+            if not resp.has_tool_calls:
+                logger.warning("Prune guest memory: LLM bypassed pruning tool calls.")
+                return False
+
+            args = resp.tool_calls[0].arguments
+            if isinstance(args, str): args = json.loads(args)
+            refined_content = args.get("refined_content")
+
+            if self._is_valid_memory(refined_content) and refined_content != guest_mem:
+                # Atomically ensure TrustScore header is intact if it was missing in output
+                old_header_match = re.match(r'^(---\n.*?\n---)', guest_mem, re.DOTALL)
+                new_header_match = re.match(r'^(---\n.*?\n---)', refined_content, re.DOTALL)
+                if old_header_match and not new_header_match:
+                     refined_content = f"{old_header_match.group(1)}\n{refined_content}"
+
+                if "TrustScore" not in refined_content:
+                    logger.warning("Pruned content lost TrustScore YAML, rejecting write for {}", user_id)
+                    return False
+
+                self.write_guest(user_id, refined_content)
+                logger.info("Memory Pruning successful for guest={}, length {} -> {}", 
+                            user_id, len(guest_mem), len(refined_content))
+                return True
+            
+            return False
+        except Exception as e:
+            logger.error("Failed to prune guest memory for {}: {}", user_id, e)
+            return False
+
     def _is_valid_memory(self, content: str | None) -> bool:
         """Check if the memory content is valid and safe to write."""
         if not content or not isinstance(content, str):
@@ -263,7 +347,7 @@ CRITICAL RULES:
         if content.strip().lower() in invalid_placeholders:
             return False
         # Basic sanity check: content should have some substance
-        if len(content.strip()) < 2:
+        if len(content.strip()) < 10: # Increased minimum length for safety
             return False
         return True
 
