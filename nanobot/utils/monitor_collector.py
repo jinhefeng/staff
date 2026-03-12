@@ -14,6 +14,7 @@ def collect_monitor_data():
         "heartbeat": {"tasks": []},
         "sessions": {"active_count": 0, "recent": []},
         "deferred_tasks": [],
+        "cron_jobs": [], # Add node for cron jobs
         "events": [] # System events from heartbeat.jsonl
     }
 
@@ -111,6 +112,41 @@ def collect_monitor_data():
             data["events"].reverse() # Newest first
         except Exception as e:
             print(f"Error reading heartbeat events: {e}")
+
+    # 5. Collect Cron Jobs
+    cron_path = os.path.join(base_dir, "cron", "jobs.json")
+    if os.path.exists(cron_path):
+        try:
+            with open(cron_path, 'r', encoding='utf-8') as f:
+                jobs_data = json.load(f)
+                jobs_list = jobs_data.get("jobs", [])
+                for job in jobs_list:
+                    # Parse schedule
+                    schedule = job.get("schedule", {})
+                    schedule_text = ""
+                    if schedule.get("kind") == "every":
+                        schedule_text = f"每 {schedule.get('everyMs', 1000) // 1000} 秒"
+                    elif schedule.get("kind") == "at":
+                        schedule_text = f"在 {schedule.get('atMs')}"
+                    elif schedule.get("kind") == "cron":
+                        schedule_text = f"Expr: {schedule.get('expr')}"
+                    else:
+                        schedule_text = "Unknown"
+
+                    payload = job.get("payload", {})
+                    state = job.get("state", {})
+                    
+                    data["cron_jobs"].append({
+                        "id": job.get("id"),
+                        "name": job.get("name"),
+                        "enabled": job.get("enabled", False),
+                        "schedule_text": schedule_text,
+                        "stop_condition": payload.get("stop_condition", ""),
+                        "to_target": payload.get("to", "direct"),
+                        "next_run_ms": state.get("nextRunAtMs")
+                    })
+        except Exception as e:
+            print(f"Error reading cron jobs: {e}")
 
     # Output to data.json
     output_path = os.path.join(website_dir, "data.json")

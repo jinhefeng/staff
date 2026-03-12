@@ -16,10 +16,13 @@
    - 展示最近活跃的对话记录（源文件、最后更新时间、消息条数）。
 4. **后台任务流 (Background Tasks)**：
    - 识别工单内容中包含 `[DEFERRED TASK]` 的条目，单独汇总展示。
-5. **系统动态 (System Events)**：【新增】
+5. **系统动态 (System Events)**：
    - 提取自 `workspace/sessions/heartbeat.jsonl`。
    - 解析最近 60 条助理通知，展示系统实时运行深度日志。
    - 区分显示“静默模式 (Silent Mode)”下的后台静默任务。
+6. **定时任务 (Cron Jobs)**：【新增】
+   - 提取自 `cron/jobs.json`。
+   - 实时同步展示系统中所有的计划任务、下次触发倒计时 (`nextRunAtMs`) 及执行条件。
 
 ## 2. API 定义 (Data Structure)
 系统采用“文件静态化”方案，由后台脚本生成 `data.json` 给前端使用。
@@ -42,6 +45,16 @@
       "content": "通知内容",
       "timestamp": "ISO-Date",
       "is_silent": true/false
+    }
+  ],
+  "cron_jobs": [
+    {
+      "id": "job_1",
+      "name": "Cron Job",
+      "enabled": true,
+      "schedule_text": "每 600 秒",
+      "stop_condition": "System idle",
+      "next_run_ms": 1773250000000
     }
   ]
 }

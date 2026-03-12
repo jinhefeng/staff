@@ -30,9 +30,14 @@ class ContextBuilder:
         self, 
         skill_names: list[str] | None = None,
         is_master: bool = False,
-        current_user_id: str = ""
+        current_user_id: str = "",
+        use_summary: bool = False
     ) -> str:
-        memory = self.memory.get_memory_context(is_master=is_master, current_user_id=current_user_id)
+        memory = self.memory.get_memory_context(
+            is_master=is_master, 
+            current_user_id=current_user_id, 
+            use_summary=use_summary
+        )
         
         parts = [self._get_identity(is_master=is_master, memory_context=memory, current_user_id=current_user_id)]
 
@@ -158,7 +163,7 @@ class ContextBuilder:
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None, sender_name: str | None = None) -> str:
-        """构建注入到用户消息前的非信任运行时元数据块。"""
+        """构建注入到用户消息的前置元数据。"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = time.strftime("%Z") or "UTC"
         lines = [f"当前时间 (Current Time): {now} ({tz})"]
@@ -191,14 +196,32 @@ class ContextBuilder:
         is_master: bool = False,
         current_user_id: str = "",
         sender_name: str = "",
+        use_summary: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        return [
-            {"role": "system", "content": self.build_system_prompt(skill_names, is_master, current_user_id)},
-            *history,
-            {"role": "user", "content": self._build_runtime_context(channel, chat_id, sender_name=sender_name)},
-            {"role": "user", "content": self._build_user_content(current_message, media)},
+        
+        # Scheme Q (Literal Multi-part Structure):
+        # 1. 历史存档 (history)
+        # 2. 运行时上下文 (Runtime Context)
+        # 3. 最后一回合消息 (lastMsg)
+        
+        clean_history = list(history)
+        # 消除重复：如果历史里已经存了当前消息（从 loop.py 的即时存盘逻辑而来），切除它
+        if clean_history and clean_history[-1].get("role") == "user":
+            if clean_history[-1].get("content") == current_message:
+                clean_history.pop()
+
+        # 按照用户要求的“正确结构”拼接消息列表
+        runtime_context = self._build_runtime_context(channel, chat_id, sender_name=sender_name)
+        
+        messages = [
+            {"role": "system", "content": self.build_system_prompt(skill_names, is_master, current_user_id, use_summary=use_summary)},
+            *clean_history,
+            {"role": "system", "content": runtime_context}, # 独立节点: Runtime Context (使用 system 角色防止与下一条 user 合并)
+            {"role": "user", "content": self._build_user_content(current_message, media)} # 独立节点: lastMsg
         ]
+        
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""

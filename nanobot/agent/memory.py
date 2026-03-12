@@ -16,30 +16,50 @@ if TYPE_CHECKING:
 
 import re
 
-_SAVE_MEMORY_TOOL = [
+_EXTRACT_MEMORY_DELTAS_TOOL = [
     {
         "type": "function",
         "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
+            "name": "extract_deltas",
+            "description": "Extract new facts, preferences, or sentiments from the conversation snippet.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "history_entry": {
                         "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
+                        "description": "A concise paragraph summarizing key events/topics of this snippet. Start with [YYYY-MM-DD HH:MM].",
                     },
+                    "extracted_facts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "A list of NEWLY discovered facts/preferences. MUST prefix each with [NEUTRAL], [CAUTION], or [STRATEGY]. Return empty array if nothing new.",
+                    }
+                },
+                "required": ["history_entry", "extracted_facts"],
+            },
+        },
+    }
+]
+
+_MERGE_MEMORY_TOOL = [
+    {
+        "type": "function",
+        "function": {
+            "name": "merge_memory",
+            "description": "Merge extracted facts into existing knowledge documentation resolving conflicts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
                     "guest_memory_update": {
                         "type": "string",
-                        "description": "Full updated markdown for the current user's exclusive memory sandbox. Ensure TrustScore YAML is kept at the top.",
+                        "description": "Full updated markdown for the Guest sandbox. Ensure TrustScore YAML exists at the top. Deduped and compressed.",
                     },
                     "global_knowledge_update": {
                         "type": "string",
-                        "description": "Full updated markdown for the Core Global Knowledge. Only use if instructed to update global truth (Requires Master privileges).",
+                        "description": "Full updated markdown for Core Global Knowledge. Leave empty if no global info changed.",
                     },
                 },
-                "required": ["history_entry"],
+                "required": ["guest_memory_update"],
             },
         },
     }
@@ -105,9 +125,9 @@ class MemoryStore:
         self.write_guest(user_id, content)
         return content, False
 
-    def update_guest_deterministic(self, user_id: str, updates: dict[str, Any]) -> None:
-        """Deterministically update guest memory fields (metadata and content).
-        Directly manipulates YAML and text to avoid LLM hallucination.
+    def update_guest_deterministic(self, user_id: str, updates: dict[str, Any]) -> bool:
+        """Deterministically update guest memory fields (metadata).
+        Directly manipulates YAML header exclusively.
         """
         content, _ = self.read_guest(user_id)
         
@@ -119,94 +139,27 @@ class MemoryStore:
             
             # Simple YAML parser-like logic for our controlled schema
             for key, val in updates.items():
-                if key in ["TrustScore", "LastSyncDate"]:
-                    pattern = rf"^{key}:.*$"
-                    if re.search(pattern, header_str, re.MULTILINE):
-                        header_str = re.sub(pattern, f"{key}: {val}", header_str, flags=re.MULTILINE)
-                    else:
-                        # Append before the closing ---
-                        header_str = header_str.replace("\n---", f"\n{key}: {val}\n---")
+                if not val:  # Skip empty values
+                    continue
+                # Normalize keys (Name, Email, DeptPath, Title, etc.) for YAML section mapping
+                yaml_key = key.title() if key.lower() in ['name', 'email', 'title'] else key
+                
+                # We dynamically update ANY passed key in the YAML header
+                pattern = rf"(?m)^{yaml_key}:.*$"
+                str_val = str(val).strip().replace('\n', ' ')
+                if re.search(pattern, header_str):
+                    header_str = re.sub(pattern, f"{yaml_key}: {str_val}", header_str)
+                else:
+                    # Append before the closing ---
+                    header_str = header_str.replace("\n---", f"\n{yaml_key}: {str_val}\n---")
             
             content = header_str + body_str
-
-        # 1. Section extraction
-        # We target the section between '### 🎭 基本特质与履历' and the next '###'
-        marker = "### 🎭 基本特质与履历"
-        if marker not in content:
-            content += f"\n\n{marker}\n"
-        
-        # Split content into parts: before, section, after
-        # Safely capture everything BEFORE the marker
-        marker_idx = content.find(marker)
-        before_marker = content[:marker_idx]
-        rest = content[marker_idx + len(marker):]
-        
-        # Find where the next section starts
-        next_section_pos = rest.find("\n###")
-        if next_section_pos != -1:
-            section_content = rest[:next_section_pos]
-            after_section = rest[next_section_pos:]
+            self.write_guest(user_id, content)
+            logger.info("Atomic YAML profile reconstruction for user {}: {}", user_id, list(updates.keys()))
+            return True
         else:
-            section_content = rest
-            after_section = ""
-
-        # 2. Parse existing KV and schema
-        # schema: (internal_key, Display Label, [Search Patterns])
-        schema = [
-            ("name", "Name (姓名)", [r"Name\s*\(姓名\)", r"Name", r"姓名"]),
-            ("email", "Email (邮箱)", [r"Email\s*\(邮箱\)", r"Email", r"邮箱"]),
-            ("title", "Title (职位)", [r"Title\s*\(职位\)", r"Title", r"职位"]),
-            ("DeptPath", "DeptPath (组织架构)", [r"DeptPath\s*\(组织架构\)", r"DeptPath"]),
-        ]
-        
-        kv_map = {}
-        # Parse existing values to preserve them if not in 'updates'
-        for key, display, patterns in schema:
-            combined = "|".join(patterns)
-            match = re.search(rf"(?m)^([- \t]*(\*\*)?({combined})(\*\*)?:\s*)(.*)$", section_content)
-            if match:
-                kv_map[key] = match.group(5).strip()
-
-        # 3. Apply updates
-        schema_keys = [s[0] for s in schema]
-        for k, v in updates.items():
-            if k in schema_keys:
-                kv_map[k] = str(v).strip().replace("\n", " ").replace("\r", "")
-
-        # 4. Reconstruct the clean section
-        new_section_lines = [marker]
-        for key, display, _ in schema:
-            val = kv_map.get(key, "")
-            new_section_lines.append(f"- **{display}**: {val}")
-        
-        # Preserve other non-schema fields (Identity, etc)
-        # We also filter out any 'orphan' lines that were likely residuals of our schema keys
-        schema_lookup_combined = "|".join([p for _, _, pats in schema for p in pats])
-        
-        for line in section_content.splitlines():
-            clean_line = line.strip()
-            if not clean_line or clean_line.startswith("###"): continue
-            
-            # If it's a schema field, it's already handled
-            if re.match(rf"^([- \t]*(\*\*)?({schema_lookup_combined})(\*\*)?:\s*)", clean_line):
-                continue
-            
-            # If it's an orphan line matching a value we just updated, discard it to fix the 'newline bug'
-            is_orphan = False
-            if not clean_line.startswith("-"):
-                for val in kv_map.values():
-                    if val and val in clean_line and len(clean_line) < len(val) + 5:
-                        is_orphan = True
-                        break
-            
-            if not is_orphan:
-                new_section_lines.append(line)
-
-        # 5. Assembly
-        final_content = (before_marker + "\n".join(new_section_lines).strip() + "\n" + after_section).strip() + "\n"
-        
-        self.write_guest(user_id, final_content)
-        logger.info("Atomic profile reconstruction for user {}: {}", user_id, updates.keys())
+            logger.warning("No YAML header found in guest memory for {}. Skipping updates.", user_id)
+            return False
 
     def write_guest(self, user_id: str, content: str) -> None:
         g_file = self._get_guest_file(user_id)
@@ -216,18 +169,90 @@ class MemoryStore:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
 
-    def get_memory_context(self, is_master: bool = False, current_user_id: str = "") -> str:
-        """Get filtered memory context based on identity.
-        Master sees global + their own specific guest file.
-        Guest sees global + their own specific guest file.
-        """
+    def _get_guest_summary_file(self, user_id: str) -> Path:
+        summary_dir = self.guests_dir / "summaries"
+        summary_dir.mkdir(parents=True, exist_ok=True)
+        return summary_dir / f"{user_id}.md"
+
+    def read_guest_summary(self, user_id: str) -> tuple[str, bool]:
+        """Read the guest profile summary."""
+        s_file = self._get_guest_summary_file(user_id)
+        if s_file.exists():
+            return s_file.read_text(encoding="utf-8"), True
+        return "", False
+
+    def write_guest_summary(self, user_id: str, content: str) -> None:
+        """Write the distilled guest profile summary."""
+        self._get_guest_summary_file(user_id).write_text(content, encoding="utf-8")
+
+    def get_memory_context(self, is_master: bool = False, current_user_id: str = "", use_summary: bool = False) -> str:
+        """Get filtered memory context based on identity, supporting Cold-Boot profiling."""
         global_mem = self.read_global()
-        guest_mem, _ = self.read_guest(current_user_id)
         
+        guest_mem = ""
+        tag = ""
+        # Apply cold-boot memory routing: heavily trims context window
+        if use_summary and not is_master:
+            summary, exists = self.read_guest_summary(current_user_id)
+            if exists:
+                guest_mem = summary
+                tag = " [COLD BOOT: Profile Snapshot Only]"
+        
+        # Fallback to full document if no summary exists or if master
+        if not guest_mem:
+            guest_mem, _ = self.read_guest(current_user_id)
+            
         if is_master:
             return f"## Core Memory (Master View - Full Access)\n{global_mem}\n\n## Master's Private Memory Sandbox (Read-Write)\n{guest_mem}"
             
-        return f"## Core Global Knowledge (Read-Only)\n{global_mem}\n\n## Your Exclusive Memory Sandbox (Read-Write)\n{guest_mem}"
+        return f"## Core Global Knowledge (Read-Only)\n{global_mem}\n\n## Your Exclusive Memory Sandbox (Read-Write){tag}\n{guest_mem}"
+
+    async def purify_guest_memory(self, user_id: str, provider, model: str) -> bool:
+        """Nightly Purify: Compress the bulky guest.md into a highly distilled profile summary."""
+        import re
+        guest_mem, exists = self.read_guest(user_id)
+        if not exists or len(guest_mem) < 300:
+            return False  # Skip already small profiles
+            
+        header_match = re.search(r'^(---\n.*?\n---)', guest_mem, re.DOTALL)
+        yaml_header = header_match.group(1) if header_match else ""
+        
+        prompt = f'''You are a master profile summarizer. Compress the following bulky guest memory document into an ultra-concise snapshot (max 150 words). 
+Focus strictly on:
+1. Core persona/identity
+2. Critical preferences or restrictions (Taboos)
+3. Actionable strategy for the assistant
+
+CRITICAL RULES:
+- Reply with ONLY the Markdown content. Do NOT wrap in ```markdown blocks if possible.
+- The output MUST fit within a single glance.
+
+## Source Document
+{guest_mem}'''
+        
+        try:
+            resp = await provider.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=0.1
+            )
+            summary_content = resp.content.strip()
+            
+            # Strip wrapper
+            if summary_content.startswith("```markdown"):
+                summary_content = summary_content[11:]
+            elif summary_content.startswith("```"):
+                summary_content = summary_content[3:]
+            if summary_content.endswith("```"):
+                summary_content = summary_content[:-3]
+                
+            final_summary = f"{yaml_header}\n\n{summary_content.strip()}"
+            self.write_guest_summary(user_id, final_summary)
+            logger.info("Nightly purify generated summary snapshot for guest={}", user_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to purify guest memory for {}: {}", user_id, e)
+            return False
 
     def _is_valid_memory(self, content: str | None) -> bool:
         """Check if the memory content is valid and safe to write."""
@@ -253,15 +278,11 @@ class MemoryStore:
         current_user_id: str = "UnknownGuest",
         is_master: bool = False,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call."""
+        """Consolidate old messages using Map-Reduce (Extract Deltas -> Merge) architecture."""
         if archive_all:
             old_messages = session.messages
-            keep_count = 0
             logger.info("Memory consolidation (archive_all): {} messages", len(session.messages))
         else:
-            # Scheme N: Robust Anchor Slicing (Configurable Safe Buffer)
-            # Scheme N: Robust ID-based slicing
-            # 1. Find the anchor index in current messages
             anchor_idx = -1
             if session.last_consolidated_id:
                 for i, m in enumerate(session.messages):
@@ -269,169 +290,165 @@ class MemoryStore:
                         anchor_idx = i
                         break
                         
-            # 2. Slice messages to consolidate (excluding what's already done and what's in Safe Buffer)
-            # Get safe_buffer from the session object, which was correctly synced from AgentLoop
             safe_buffer = getattr(session, "session_safe_buffer", 20)
-            
-            # Use the actual list length to guard against over-slicing
-            # end_idx is the index up to which we archive. 
-            # We must keep 'safe_buffer' messages at the end.
             end_idx = len(session.messages) - safe_buffer
             
             logger.info("Memory consolidation slicing: anchor_idx={}, end_idx={}, total={}, buffer={}, window={}", 
                         anchor_idx, end_idx, len(session.messages), safe_buffer, memory_window)
 
             if end_idx <= anchor_idx + 1:
-                logger.info("Memory consolidation: No harvestable messages after anchor {} (index {}) with buffer {} reserved. Skipping.", 
-                            session.last_consolidated_id, anchor_idx, safe_buffer)
                 return False
 
             old_messages = session.messages[anchor_idx + 1 : end_idx]
             if not old_messages:
                 return False
-            logger.info("Memory consolidation: {} to consolidate (idx {} to {}), {} buffer reserved", 
-                        len(old_messages), anchor_idx + 1, end_idx, safe_buffer)
+            logger.info("Memory consolidation: {} to consolidate (idx {} to {})", len(old_messages), anchor_idx + 1, end_idx)
 
-        lines = [] # Initialize lines here, as it's used in both branches
+        lines = []
         for m in old_messages:
             content = m.get("content")
-            if not content:
-                continue
-            
+            if not content: continue
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {content[:1000]}")
 
+        # --- PHASE 1: MAP (Extract Fact Deltas) ---
+        prompt_map = f"""Process the following conversation snippet. Focus strictly on extracting incremental changes.
+## Conversation Snippet
+{chr(10).join(lines)}
+
+## Extraction Directive
+1. Output a coherent `history_entry` summarizing the interaction.
+2. Extract ANY NEW facts, user preferences, conclusions, or emotional traits into `extracted_facts`.
+3. You MUST prefix each fact with a structural colored tag:
+   - `[NEUTRAL]`: Normal facts, state updates.
+   - `[CAUTION]`: Taboos, sensitive topics, red flags.
+   - `[STRATEGY]`: Communication logic overrides, instructions from Master.
+4. If this snippet is pure chitchat with no long-term persistence value, return an empty array for `extracted_facts`.
+"""
+        extracted_facts = []
+        try:
+            resp_map = await provider.chat(
+                messages=[
+                    {"role": "system", "content": "You are a precise data extractor. Extract pure factual deltas without assuming prior context."},
+                    {"role": "user", "content": prompt_map},
+                ],
+                tools=_EXTRACT_MEMORY_DELTAS_TOOL,
+                model=model,
+            )
+            
+            if not resp_map.has_tool_calls:
+                logger.warning("Consolidate Map Phase: LLM bypassed extraction.")
+            else:
+                args = resp_map.tool_calls[0].arguments
+                if isinstance(args, str): args = json.loads(args)
+                
+                # Update history right away
+                if entry := args.get("history_entry"):
+                    if not isinstance(entry, str): entry = json.dumps(entry, ensure_ascii=False)
+                    self.append_history(entry)
+                    
+                facts = args.get("extracted_facts", [])
+                if isinstance(facts, list):
+                    extracted_facts = [str(f) for f in facts if f]
+                    
+            # Advance cursor even if we didn't extract anything or failed Phase 1
+            if old_messages:
+                last_msg_id = old_messages[-1].get("metadata", {}).get("dingtalk_msg_id")
+                if last_msg_id:
+                    session.last_consolidated_id = last_msg_id
+                    
+            if not extracted_facts:
+                logger.info("Consolidate Map Phase: No new facts extracted. Skipping Reduce phase (Cursor advanced to {}).", session.last_consolidated_id)
+                return True
+                
+        except Exception:
+            logger.exception("Consolidate Map Phase failed")
+            return False
+
+        # --- PHASE 2: REDUCE (Merge & Deduplicate) ---
         current_global = self.read_global()
         current_guest, _ = self.read_guest(current_user_id)
         
-        prompt = f"""Process the following conversation snippet and update the agent's memory systems.
+        prompt_reduce = f"""You are the Master Archive Editor. Deeply merge new factual fragments into exiting documents.
 
-## 1. Current Global Knowledge Base (Read-Only context)
+## 1. Current Global Knowledge Base (Master Access: {'YES' if is_master else 'NO'})
 {current_global or "(empty)"}
 
 ## 2. Current Exclusive Memory Sandbox for User {current_user_id}
 {current_guest}
 
-## 3. Conversation to Process
-{chr(10).join(lines)}
+## 3. NEW Incremental Fact Deltas to Merge
+{chr(10).join([f"- {f}" for f in extracted_facts])}
 
-## Instructions:
-1. **Identify NEW Facts & Preferences**: Extract any important facts, project updates, or subjective preferences.
-   - **Persona Enrichment**: Enhance user profiling using the conversation context.
-   - **Relationship & Habits**: Observe their relationship with 'Gold Master' and their interaction style.
-   - **Communication Habits**: Note if they prefer brevity, are technical, or have specific taboos.
-   Note: Objective facts like Name, Title, and Dept are now handled automatically by the system and do not need extraction.
-2. **Global Update (Both Master & Guests)**: 
-   - Is Master Mode (with highest authority): {'YES' if is_master else 'NO'}
-   - If there are new universally shared truths (e.g. general technical facts, public news), write to `global_knowledge_update`.
-   - **CRITICAL DOUBLE-LAYER RULES**:
-     - The global markdown MUST have two predefined sections: "### 👑 1. Master 认定的绝对真相" and "### 👥 2. 客体/群体共识总结的真相".
-     - If you are in **Master Mode (YES)**: You are authorized to overwrite or append to Section 1 (Master Absolute Truths) with Master's rulings.
-     - If you are NOT in Master Mode (NO): You are strictly **forbidden** from modifying Section 1. You may only summarize and add general non-private consensus facts into Section 2.
-     - If no new global info is found, just return the exact `current_global` content.
-3. **Guest Sandbox**: 
-   - Update `guest_memory_update` using EXACTLY the following Markdown structure. Do NOT invent new headings:
-     ### 🎭 基本特质与履历 (Persona & Basic Info)
-     ### 🛠️ 行为偏好与沟通习惯 (Preferences)
-     ### 🛡️ 专属口径与应对策略 (Tailored Narrative)
-     ### 📝 近期互动与挂机状态 (Recent Context & Unresolved Issues)
-   - **Tagged Knowledge**: Maintain and use structural colored tags:
-     - `[NEUTRAL]`: Facts or simple observations.
-     - `[CAUTION]`: Taboos or sensitive topics for this user.
-     - `[STRATEGY]`: Communication instructions/narrative overrides.
-   - **Precedence & Secrets**: If Master instructed you to keep a secret from this guest or lie, put it under "Tailored Narrative" with `[STRATEGY]`. If it contradicts Global Section 1, the Strategy is the absolute truth *for this guest only*.
-   - **Safety**: ALWAYS preserve the YAML header (e.g., `--- TrustScore: 50 ---`). Keep the total length concise.
-4. **Safety Guard**: NEVER return "None", "null", or empty strings for memory updates.
+## Editing Directive (Deduplication & Compaction)
+1. **Guest Sandbox**: Integrate new facts into the 4 rigid sections (Persona, Preferences, Tailored Narrative, Recent/Status). 
+   - [DEDUPLICATION]: If a new fact aligns with or repeats an existing fact, DO NOT ADD IT TWICE. Merge them into a single, polished sentence.
+   - [COMPACTION]: If any section contains >4 bullet points, rewrite the entire section into a dense, cohesive paragraph to save tokens.
+   - [SAFETY]: ALWAYS preserve the `--- TrustScore: XY ---` YAML header exactly as it was.
+2. **Global Update**: Update `global_knowledge_update` ONLY if there are universally shared facts.
+   - [RULE 1]: Global is split into "### 👑 1. Master 认定的绝对真相" and "### 👥 2. 客体/群体共识总结的真相".
+   - [RULE 2 (Master Access=NO)]: You are strictly FORBIDDEN from altering Section 1. If any new fact contradicts Section 1, discard the new fact entirely! You may only append/merge into Section 2.
+   - [RULE 3 (Master Access=YES)]: You have supreme authority to overwrite Section 1 to set absolute truths.
+   - Ignore `global_knowledge_update` if nothing global changed.
 """
-
         try:
-            response = await provider.chat(
+            resp_reduce = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a senior memory architect. Your goal is to consolidate session history while ensuring data integrity and enforcing the dual-layer truth mechanism."},
-                    {"role": "user", "content": prompt},
+                    {"role": "system", "content": "You are a rigorous archive deduplicator. Merge facts flawlessly without losing information or creating redundancies."},
+                    {"role": "user", "content": prompt_reduce},
                 ],
-                tools=_SAVE_MEMORY_TOOL,
+                tools=_MERGE_MEMORY_TOOL,
                 model=model,
             )
-
-            if not response.has_tool_calls:
-                # 修复 V8：当 LLM 认为全是无意义水聊而不调用工具时，
-                # 必须强行排空（ACK）并推进游标返回 True，否则会产生永远停在此处的算力黑洞死锁。
-                logger.warning("Memory consolidation: LLM found no valuable context to save, bypassing extraction but advancing anchor index.")
-                # We skip to the final update block to advance the cursor.
-            else:
-                args = response.tool_calls[0].arguments
-                if isinstance(args, str):
-                    args = json.loads(args)
-                if not isinstance(args, dict):
-                    # 如果参数彻底损坏，这种极端情况允许重试
-                    return False
-
-                # 1. Update History.md (Log)
-                if entry := args.get("history_entry"):
-                    if not isinstance(entry, str):
-                        entry = json.dumps(entry, ensure_ascii=False)
-                    self.append_history(entry)
-                    
-                # 2. Update Guest Memory (Compacted)
+            
+            if resp_reduce.has_tool_calls:
+                args = resp_reduce.tool_calls[0].arguments
+                if isinstance(args, str): args = json.loads(args)
+                
+                # Update Guest Memory
                 if update := args.get("guest_memory_update"):
-                    if not isinstance(update, str):
-                        update = json.dumps(update, ensure_ascii=False)
+                    if not isinstance(update, str): update = json.dumps(update, ensure_ascii=False)
                     
-                    # Auto-recovery: If TrustScore header is missing but present in current_guest,补全它
+                    # Auto-recovery for TrustScore YAML
                     import re
                     old_header_match = re.match(r'^(---\n.*?\n---)', current_guest, re.DOTALL)
                     new_header_match = re.match(r'^(---\n.*?\n---)', update, re.DOTALL)
-                    
                     if old_header_match and not new_header_match:
-                        logger.info("Memory consolidation: Auto-restoring TrustScore header for {}", current_user_id)
+                        logger.info("Consolidate Reduce: Auto-restoring TrustScore header for {}", current_user_id)
                         update = f"{old_header_match.group(1)}\n{update}"
 
-                    # Defensive check: Ensure it's not a placeholder
                     if self._is_valid_memory(update) and update != current_guest:
-                        # Final check: Even after recovery, did it lose the header?
-                        if "TrustScore" in current_guest and "TrustScore" not in update:
-                            logger.warning("Memory consolidation: Update lost TrustScore header, rejecting")
+                        if "TrustScore" not in update:
+                            logger.warning("Consolidate Reduce: Update lost TrustScore header, rejecting")
                         else:
                             self.write_guest(current_user_id, update)
 
-                # 3. Update Global Knowledge (Conflict Resolution & Double-Layer)
+                # Update Global Knowledge
                 if global_upd := args.get("global_knowledge_update"):
-                    if not isinstance(global_upd, str):
-                        global_upd = json.dumps(global_upd, ensure_ascii=False)
+                    if not isinstance(global_upd, str): global_upd = json.dumps(global_upd, ensure_ascii=False)
                     
-                    # Physical Guard: Only overwrite if it's valid and informative
                     if self._is_valid_memory(global_upd) and global_upd != current_global:
-                        # Safety check
                         if len(current_global) > 200 and len(global_upd) < 50:
-                             logger.error("Memory consolidation: Detected suspicious global memory shrinkage, blocking update")
+                             logger.error("Consolidate Reduce: Detected suspicious global memory shrinkage, blocking update")
                         else:
-                            # Extra security validation: If not master, forbid tampering with section 1.
-                            # We use regex to extract the content of Section 1 in old and new global.
                             if not is_master:
                                 import re
                                 def _extract_section_1(text):
                                     match = re.search(r'(###.*1\..*?真相)(.*?)(###.*2\..*?真相|$)', text, re.DOTALL)
                                     return match.group(2).strip() if match else ""
-                                
                                 old_s1 = _extract_section_1(current_global)
                                 new_s1 = _extract_section_1(global_upd)
                                 if old_s1 and new_s1 and old_s1 != new_s1:
-                                    logger.warning("Consolidate Access Denied: Guest/Group chat attempted to modify Master Absolute Truths. Rejecting.")
+                                    logger.warning("Consolidate Reduce Denied: Guest attempted to modify Master Absolute Truths. Rejecting global update.")
                                 else:
                                     self.write_global(global_upd)
                             else:
                                 self.write_global(global_upd)
-
-                # Final Update: Shift existing pointers and record the new ID anchor (Scheme N: Robust Slicing)
-            if old_messages:
-                last_msg_id = old_messages[-1].get("metadata", {}).get("dingtalk_msg_id")
-                if last_msg_id:
-                    session.last_consolidated_id = last_msg_id
-            
-            logger.info("Memory consolidation done: {} messages consolidated, last_consolidated_id={}", 
-                        len(old_messages), session.last_consolidated_id)
+            else:
+                logger.warning("Consolidate Reduce Phase: LLM bypassed merging.")
+                
+            logger.info("Memory consolidation done: Map-Reduce cycle completed (last_consolidated_id={})", session.last_consolidated_id)
             return True
         except Exception:
-            logger.exception("Memory consolidation failed")
+            logger.exception("Consolidate Reduce Phase failed")
             return False

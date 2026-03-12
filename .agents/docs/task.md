@@ -229,16 +229,26 @@
   - [x] 样本快照分析：`debug_20260308_174802_839303.json` 诊断 [x]
   - [ ] 输出《上下文权重优化分析报告及实施方案》(ADR-034) [Needs Review]
 - [ ] **逻辑重构**：
-  - [ ] **[B-1] System Prompt 动态化与瘦身**：
-    - [ ] 改造 `ContextBuilder` 支持 Conditional Bootstrap (按需加载 SOP)。
-    - [ ] 实现针对 Master/Guest 模式的差异化 Prompt 组件剔除。
-  - [ ] **[B-2] 消息结构压实与锚点强化**：
-    - [ ] 将 `Runtime Context` 合并至 User 消息末尾/首部（取决于注意力实验）。
-    - [ ] 在 `System` 底部增加“近期任务锚点 (Recent Context Anchor)”。
-  - [ ] **[B-3] 长短期记忆协调机制 (LRU-based Memory/Summary)**：
-    - [ ] 实现对过往 `tool_result` 的更激进摘要（非简单截断）。
-    - [ ] 引入“记忆相关性搜索”初步逻辑（Semantic Search or Keyword Pick）。
-- [ ] **回归验收**：通过“代词指代”、“跨度追问”等 Benchmark 验证优化效果。
+  - [x] **[B. Map 增量抽取逻辑重塑]**
+    - 创建新的 `_EXTRACT_MEMORY_DELTAS_TOOL`
+    - 修改 `consolidate` 函数：只将增量事实打上色彩标后抽取（作为 Phase 1）
+  - [x] **[C. Reduce 语义合并与压缩重塑]**
+    - 创建新的 `_MERGE_MEMORY_TOOL`
+    - 增加严格的 Prompt Guardrails：根据 `is_master` 参数，动态锁定对 `global.md` 区1的编辑权限。要求执行去重及浓缩合并（作为 Phase 2）。
+  - [x] **[E. 双引擎联合调试与验收 (Verification)]**
+    - 创建沙箱测试用例 `test_memory_engine.py` 并隔离验证
+    - 确立 Qwen3 模型与 Litellm 包装器的 `tool_calls` 高速接驳机制
+    - 验证 YAML Head 保护与结构化合并能力
+
+## 阶段四十一：记忆域强解耦与梦境提纯高阶进化 (Phase 41) [In Progress]
+- [x] **[A. Markdown锚点解耦与 YAML 提权]**
+  - **目标**：将所有强类型身份数据（Name, DeptPath, Title 等）上移至 `guest.md` 的 YAML 文件头，剥离物理引擎对 Markdown 主体的侵袭。
+- [x] **[B. 领域模板 (`guest_template.md`) 重塑]**
+  - **目标**：清洗模板，破除静态的“简历式”占据体，只保留四大语义区块供大模型自我发挥。
+- [x] **[C. 梦境提纯架构赋能 (Nightly Purify)]**
+  - **目标**：夜间批处理将厚重的记忆提取为极速“画像摘要 (Profile Summary)”。
+  - **【架构释疑：对冲冷启动路由的判定耗时】**：在判断一句话该用“冷加载(快照)”还是“热加载(原本全文档)”时，若是动用大语言模型本身去做意图探险，其数百毫秒的 TTFT（首字延迟）就会抹平冷加载省下的时间。因此，实施时必须在加载引擎边缘侧搭建一片 **超轻量规则防火墙（或基于本地毫秒级小参数 Classifier）**：纯闲聊/字符少于 15/无特指名词直接下沉冷处理。核心路由本身极轻！！
+- [x] **回归验收**：通过底层逻辑剥离验证了优化效果。
 
 ## 阶段三十五：工作区路径重塑与认知对齐 (Workspace Path Alignment) [x]
 - [x] **路径纠偏**：彻底移除代码中对 `memory/tickets/` 等硬编码路径的引用。
@@ -292,3 +302,77 @@
   - [ ] 自动化测试验证三方通知触发器
   - [ ] 手动闭环演练: 访客请求 -> Master 审批 -> Staff 执行 -> 三方自动同步
   - [ ] 编写 V3 验收 Walkthrough 文档
+
+## 阶段四十：双阶段记忆流引擎重构 (Phase 40: Map-Reduce Memory Consolidation) [/]
+- [x] **子阶段 A：方案探究与认知对齐 (Definition Phase)** [x]
+  - [x] 提出硬编码去重方案并探讨。
+  - [x] 收敛并确认最终大方案：基于 LLM 原生抽提的 Map-Reduce 两阶段融合柔性架构 (ADR-040)。
+- [/] **子阶段 B：Map(第一阶段) 增量抽取逻辑重塑** [/]
+  - [ ] 去除大模型单次全量重写的权限边界。
+  - [ ] 在 `memory.py` 设计极简的“纯净对话增量碎片提取”Prompt。
+  - [ ] 拦截并捕获 JSON 格式的 Fact Delta (增量情况)。
+- [ ] **子阶段 C：Reduce(第二阶段) 语义压缩与写入闭环** [ ]
+  - [ ] 设计“档案编辑长”Prompt（Merge-Conflict Resolution）。
+  - [ ] 实现针对 `Guest Sandbox` 及 `Global` 记忆，用旧文档与事实增量对撞生成全新浓缩版文件并覆写。
+- [ ] **子阶段 D：去除冗余干扰链路 (Reflection Refactoring)** [ ]
+  - [ ] 剥除 `nanobot/agent/reflection.py` 潜意识中重写全集档案的副产物逻辑，使其退化为纯信用打分/预警服务，消除对去重方案的杂音干扰。
+## 阶段四十二：智能体级定时任务前置校验与裁决架构 (Phase 42: Autonomous Validated Cron Architecture)
+- [ ] **子阶段 A：方案定义与固化 (Definition & Persistence)**
+  - [x] 在 `.agents/docs/task.md` 拆分出此宏大目标的验证步骤。
+  - [x] 更新 `.agents/docs/functional_spec.md` 固化三段式引擎与能力校验的架构模型。
+  - [x] [ADD] 创建专属白皮书：在 `.agents/docs/autonomous_cron_engine.md` 详细落盘此**前置校验与审判级路由**架构设计。
+  - [x] 获得架构共识。
+- [ ] **子阶段 B：底层结构改造 (Core Structure Migration)**
+  - [x] [MODIFY] 修改 `nanobot/cron/types.py` 中的 `CronPayload`，移除旧版 `message`，引入 `task_content` (str), `stop_condition` (str), `required_tools` (list[str]) 等核心字段。
+  - [x] [MODIFY] 修改 `nanobot/cron/service.py` 里的落库及读库映射（兼容旧记录的平滑过渡），保证时间轮依然能把新结构取回。
+  - [x] 验收：人工检查 `jobs.json` 序列化是否正确映射并加载完毕。
+- [ ] **子阶段 C：前置武器库校验机制 (Pre-flight Tools Validation)**
+  - [x] [MODIFY] 修改 `nanobot/agent/loop.py`，向新建的 `CronTool` 注入实例时的技能树名称集合 `list(self.tools.keys())`。
+  - [x] [MODIFY] 重构 `nanobot/agent/tools/cron.py` 的接口约束：明确要求输入三个新参数，并建立拦截门：若传来的 `required_tools` 在系统可用列表外，抛出异常阻断创建，要求模型调整。
+  - [x] 验收：故意让大模型设定一个死循环但需要它用到 `send_sms` 的不存在工具的任务，观察是否精准拦截报错。
+- [ ] **子阶段 D：唤醒即审判运行时 (Arbitration Runtime)**
+  - [x] [MODIFY] 修改 `nanobot/cli/commands.py` 里的 `on_cron_job`：设计二阶段 Prompt。第一阶段喂入 `stop_condition` 触发模型自带工具探查；
+  - [x] [MODIFY] 接驳输出 `[ACTION: STOP]` 或 `[ACTION: CONTINUE]`。对前者实施 `cron.remove_job(job.id)` 早夭；对后者则继续将 `task_content` 当做独立 Prompt 激活。
+  - [x] 验收：挂起一个带真实停止条件的任务，并满足该条件，观察下一次到达时间点时系统会不会默默摘除任务而不是发送消息。
+- [x] **子阶段 D.2：重构为纯解耦二段调用 (Two-Phase Decoupling Refactor)**
+  - [x] [MODIFY] 修改 `nanobot/cli/commands.py` 里的 `on_cron_job`：拆分为 `Phase 1 (裁判所)` 和 `Phase 2 (执行器)` 两次独立的 `agent.process_direct` 调用。
+  - [x] [MODIFY] Phase 2 调用时，仅发送纯粹的 `Task Content`，杜绝任何判定逻辑污染发信内容。
+- [x] **子阶段 E：前置信息赋能 (Read Message Context)**
+  - [x] [ADD] 在 `nanobot/agent/tools/cross_chat.py` 中新增 `ReadRecentMessagesTool`，使其能抽取目标 `sessions/dingtalk:id.md` 中的近期对话记录。
+  - [x] [MODIFY] 在 `nanobot/agent/loop.py` 补充注册 `ReadRecentMessagesTool`。
+  - [x] 验收：人工脚本模拟调用该工具能够成功萃取 N 行近期上下文，彻底闭环智能条件判断。
+
+## 阶段四十三：系统任务安全审查豁免与权限加固 (Phase 43: System Task Sanitizer Bypass) [x]
+- [x] **子阶段 A：方案分析与路由重构 (Design & Routing)**
+  - [x] 修改 `nanobot/agent/loop.py`，使 `_process_message` 支持 `is_system_internal` 标志以透传信任。
+  - [x] 优化 `process_direct` 及其调用链，确保系统自发指令（Cron/Heartbeat）在入站时携带信任指纹。
+- [x] **子阶段 B：权限边界校验优化 (Master Identity Fix)**
+  - [x] 修复 Master ID 在跨频道（Channel）调用时可能出现的身份误判，确保其在 `_process_message` 中稳定 bypass Sanitizer。
+- [x] **子阶段 C：回归测试与安全性验证 (Verification)**
+  - [x] 验证：建立包含敏感关键词的定时任务，观察其是否能在不触发拦截的情况下成功执行。
+  - [x] 验证：确保正常访客的恶意消息依然受到 Sanitizer 的严格审查。
+
+## 阶段四十四：定时任务控制台可视化展示 (Phase 44: Cron Jobs Dashboard Integration) [x]
+- [x] **子阶段 A：方案探究与架构设计 (Definition Phase)**
+  - [x] 分析如何将 `cron/jobs.json` 安全、实时地透传给本地监控面板进程 (`nanobot/utils/monitor_loop.sh`) 或交由前端轮询读取。
+  - [x] 编写实施方案，规划新面板的 UI 展示（包含：任务名称、触发频率、终止条件与目标受众）。
+- [x] **子阶段 B：数据桥接与采集层 (Data Bridge)**
+  - [x] 修改 `monitor_loop.sh`，使其能够实时聚合或复制目前的 `jobs.json` 状态供 Web 伺服器呈现。
+- [x] **子阶段 C：前端视图层重构 (UI Development)**
+  - [x] 修改 `website/monitor/index.html`，在响应式网格中分配“定时任务 (Cron Jobs)”的专属视图区块。
+  - [x] 增加 JS 渲染引擎：将 `nextRunAtMs` 转化为人类可读的倒计时，高亮展示 `stop_condition` 及目标发送人 `to`。
+- [x] **子阶段 D：回归验收 (Verification)**
+  - [x] 通过 CLI 或修改 JSON 模拟新建/删除定时任务，观察监控大屏是否做到即时响应。
+
+## 阶段四十五：LLM 输入载荷优化与交互去剧本化 (LLM Input & Interaction Optimization) [/]
+- [/] **第一阶段：基础清理与 Bug 修复 (Easy)** [/]
+    - [x] **Task 1.1: 修复 Metadata 注入 Bug (拦截机制优化)**
+    - [x] **Task 1.2: 剔除失效 Skills 载荷 (Token 降噪)**
+- [ ] **第二阶段：人设去剧本化 (Medium)** [ ]
+    - [ ] **Task 2.1: 重写 `SOUL.md` (回归员工本质)**
+    - [ ] **Task 2.2: 重写 `AGENTS.md` (口语化准则)**
+    - [ ] **Task 2.3: 风格验证与回归测试**
+- [ ] **第三阶段：动态裁剪与分层控制 (Hard)** [ ]
+    - [ ] **Task 3.1: Master 模式 Prompt 动态精简**
+    - [ ] **Task 3.2: 实施历史消息瘦身 (GC 优化)**
+    - [ ] **Task 3.3: 核心消息摘要压缩机制**

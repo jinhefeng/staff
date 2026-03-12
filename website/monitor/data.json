@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-10T01:39:31.167053",
+  "last_updated": "2026-03-12T10:18:19.855651",
   "tickets": {
     "total_active": 2,
     "items": [
@@ -21,61 +21,62 @@
     "tasks": []
   },
   "sessions": {
-    "active_count": 15,
+    "active_count": 28,
     "recent": [
       {
         "name": "dingtalk_014224562537153949.jsonl",
-        "last_modified": "2026-03-10T01:12:21.815487",
-        "msg_count": 52
+        "last_modified": "2026-03-12T10:16:35.513624",
+        "msg_count": 80
       },
       {
-        "name": "dingtalk_16191733200332613.jsonl",
-        "last_modified": "2026-03-09T09:26:49.222762",
+        "name": "014224562537153949.jsonl",
+        "last_modified": "2026-03-12T10:15:49.139605",
+        "msg_count": 3
+      },
+      {
+        "name": "dingtalk_05235155121152359.jsonl",
+        "last_modified": "2026-03-12T09:02:44.352557",
+        "msg_count": 3
+      },
+      {
+        "name": "cron_fb749fc8.jsonl",
+        "last_modified": "2026-03-12T01:21:12.995544",
+        "msg_count": 2
+      },
+      {
+        "name": "cron_test_bypass.jsonl",
+        "last_modified": "2026-03-12T01:10:23.597027",
+        "msg_count": 97
+      },
+      {
+        "name": "cron_720028fa.jsonl",
+        "last_modified": "2026-03-12T00:32:06.140362",
+        "msg_count": 5
+      },
+      {
+        "name": "cron_335a814d.jsonl",
+        "last_modified": "2026-03-12T00:30:03.203575",
         "msg_count": 4
       },
       {
-        "name": "cli_direct.jsonl",
-        "last_modified": "2026-03-08T17:42:23.548776",
-        "msg_count": 3
+        "name": "cron_c502c65d.jsonl",
+        "last_modified": "2026-03-11T02:51:16.945757",
+        "msg_count": 21
       },
       {
-        "name": "heartbeat.jsonl",
-        "last_modified": "2026-03-08T09:40:27.517303",
-        "msg_count": 87
+        "name": "cron_107d3cf2.jsonl",
+        "last_modified": "2026-03-11T02:32:27.502254",
+        "msg_count": 27
       },
       {
-        "name": "dingtalk_357.jsonl",
-        "last_modified": "2026-03-07T23:15:39.825118",
-        "msg_count": 15
-      },
-      {
-        "name": "dingtalk_cidtcTnlaQTUzj5m2PoxGl3yw==.jsonl",
-        "last_modified": "2026-03-05T22:25:35.405924",
-        "msg_count": 17
-      },
-      {
-        "name": "cron_fc952b2e.jsonl",
-        "last_modified": "2026-03-05T17:41:33.344151",
-        "msg_count": 3
-      },
-      {
-        "name": "cron_4a1a998b.jsonl",
-        "last_modified": "2026-03-05T17:39:16.542752",
-        "msg_count": 3
-      },
-      {
-        "name": "cron_e4e4c191.jsonl",
-        "last_modified": "2026-03-05T16:55:10.658578",
-        "msg_count": 3
-      },
-      {
-        "name": "cron_7ece03ef.jsonl",
-        "last_modified": "2026-03-05T00:02:33.358198",
+        "name": "cron_fbf85a76.jsonl",
+        "last_modified": "2026-03-11T02:19:12.261239",
         "msg_count": 3
       }
     ]
   },
   "deferred_tasks": [],
+  "cron_jobs": [],
   "events": [
     {
       "content": "金总，09:31。\n\n《MCP认证机制升级建议书》草稿已置顶您的钉钉待办。\n\n我已准备就绪，您只需确认：\n\n1. **生成精简摘要**（300字内，用于晨会汇报）？  \n2. **直接启动B方案升级流程**（自动注入内网CA证书、切换降级模式、预置熔断告警）？  \n3. 或先**审阅草稿全文**（路径：`/Users/jinhefeng/Dev/staff/workspace/docs/mcp_auth_upgrade_v2.md`）？\n\n我在此，等您一句话。",

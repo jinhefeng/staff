@@ -1,4 +1,4 @@
-# Core Global Knowledge
+## Core Global Knowledge
 ## Dynamic Learnt Facts
 - [2026-03-06] Staff context optimization project started.
 - [2026-03-06] Global memory logic has been reinforced with physical guards.
@@ -18,3 +18,6 @@
 - MCP认证链中断时，系统可通过注入内网CA证书（/Users/jinhefeng/Dev/staff/certs/mcp-ca-bundle.crt）恢复SSL握手，属可复现解决方案。
 - [2026-03-09] 用户金鹤峰（金总）已确认将“暴雨取消室外活动”事件作为训练样本纳入《MCP系统天气影响评估模型》，并归档至“2026极端天气响应案例库”。
 - [2026-03-10] MCP认证链中断容灾机制通过极端压力测试，死锁修复方案（TKT-3DB1C724）验证成功，系统具备生产级韧性。
+- [2026-03-12] 金鹤峰（金总）明确要求助手在工具受限时主动创建自定义监控技能，突破系统权限边界，确保对热网区域（如常州）环境温度的持续感知与实时提醒能力。
+- [2026-03-12] AI已成功部署自定义天气监控任务（ID: 720028fa）于常州区域，基于公网API（wttr.in），每5分钟执行一次，阈值为10°C，触发时自动回复“好冷啊！”，此为用户授权的非标准但被接受的扩展行为。
+- [2026-03-12] 系统曾存在非法注入任务（test_bypass），虽已删除，但暴露底层安全脆弱性，需持续监控未授权任务注入。

@@ -31,7 +31,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.agent.tickets import TicketManager
 from nanobot.agent.tools.tickets import EscalateToMasterTool, ResolveTicketTool
-from nanobot.agent.tools.cross_chat import SearchContactsTool, SendCrossChatTool
+from nanobot.agent.tools.cross_chat import SearchContactsTool, SendCrossChatTool, ReadRecentMessagesTool
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -151,8 +151,19 @@ class AgentLoop:
         self.tools.register(MemorizeFactTool(workspace=self.workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        # Cross-session chat tools (available when DingTalk is enabled)
+        if self.channels_config and hasattr(self.channels_config, "dingtalk"):
+            dt_cfg = getattr(self.channels_config, "dingtalk")
+            if dt_cfg and dt_cfg.enabled:
+                self.tools.register(SearchContactsTool(workspace=self.workspace))
+                self.tools.register(SendCrossChatTool(
+                    send_callback=self.bus.publish_outbound,
+                    workspace=self.workspace,
+                ))
+                self.tools.register(ReadRecentMessagesTool(workspace=self.workspace))
+
         if self.cron_service:
-            self.tools.register(CronTool(self.cron_service))
+            self.tools.register(CronTool(self.cron_service, available_tools=self.tools.tool_names))
 
         master_channels = []
         if self.channels_config:
@@ -182,15 +193,7 @@ class AgentLoop:
             master_channels=master_channels,
         ))
 
-        # Cross-session chat tools (available when DingTalk is enabled)
-        if self.channels_config and hasattr(self.channels_config, "dingtalk"):
-            dt_cfg = getattr(self.channels_config, "dingtalk")
-            if dt_cfg and dt_cfg.enabled:
-                self.tools.register(SearchContactsTool(workspace=self.workspace))
-                self.tools.register(SendCrossChatTool(
-                    send_callback=self.bus.publish_outbound,
-                    workspace=self.workspace,
-                ))
+
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -633,19 +636,19 @@ class AgentLoop:
                         logger.success("Thread recovered ({}): {} segments", "Tree" if is_group_scene else "Linear", len(related_msgs))
                 
                 # --- [IMMEDIATE PERSISTENCE] ---
-                # Save the user message immediately. It's the ONLY time it's saved.
+                # Save the user message immediately for durability. 
+                # ContextBuilder will handle the extraction/deduplication to ensure LLM payload remains clean.
                 session = self.sessions.get_or_create(msg.session_key)
                 is_group_persistence = msg.metadata.get("conversation_type") == "2"
                 persist_meta = self._clean_metadata(msg.metadata, is_group_persistence)
                 
-                # Global idempotency check
+                # Global idempotency check for incoming messages
                 msg_id = msg.metadata.get("dingtalk_msg_id")
                 if not any(m.get("metadata", {}).get("dingtalk_msg_id") == msg_id for m in session.messages):
                     self._save_turn(session, [{"role": "user", "content": msg.content, "metadata": persist_meta}], 0)
-                    # Scheme O: Automatic Session Pruning (Rolling Cleanup)
                     self._prune_session_if_needed(session)
                     self.sessions.save(session)
-                    logger.debug("User message persisted (Primary)")
+                    logger.debug("User message persisted (Safe-Flash)")
                 else:
                     logger.info("Message {} already exists in session, skipping save", msg_id)
 
@@ -680,6 +683,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        is_system_internal: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # --- [PRE-PROCESSING (e.g. Deterministic Profile Sync)] ---
@@ -723,10 +727,14 @@ class AgentLoop:
 
         is_master_identity = False
         conv_type = msg.metadata.get("conversation_type")
-        if self.channels_config and getattr(self.channels_config, msg.channel, None):
-            channel_cfg = getattr(self.channels_config, msg.channel)
-            if hasattr(channel_cfg, "master_ids") and msg.sender_id in channel_cfg.master_ids:
-                is_master_identity = True
+        if self.channels_config:
+            # Safely check across all configured channels
+            for field_name in self.channels_config.model_fields.keys():
+                channel_cfg = getattr(self.channels_config, field_name, None)
+                if channel_cfg and hasattr(channel_cfg, "master_ids"):
+                    if msg.sender_id in channel_cfg.master_ids:
+                        is_master_identity = True
+                        break
                 
         # Context privilege: Master only gets global RW and unrestricted context in private chats 
         is_master_context = is_master_identity and conv_type != "2"
@@ -855,7 +863,13 @@ class AgentLoop:
 
         history = session.get_history(max_messages=self.memory_window)
         
-        if not is_master_identity:
+        # Scheme P: Skip input sanitizer for authorized internal system calls or Master identities
+        skip_sanitizer = False
+        if is_system_internal:
+            logger.info("Skipping Sanitizer: Message marked as system-internal for {}", msg.sender_id)
+            skip_sanitizer = True
+
+        if not is_master_identity and not skip_sanitizer:
             from nanobot.agent.sanitizer import SanitizerAgent
             sanitizer = SanitizerAgent(self.provider, self.model)
             t_san = time.monotonic()
@@ -886,6 +900,11 @@ class AgentLoop:
             effective_content = f"{header}{msg.content}"
             logger.info("DEBUG: Full Prompt for LLM:\n{}", effective_content)
 
+        # Ultra-light routing: determine if we can skip loading the huge 5000-word Markdown profile
+        use_cold_boot = self._should_use_cold_boot(session, effective_content)
+        if use_cold_boot:
+            logger.info("Cold-Boot Routing Engaged: Mounting lightweight profile snapshot for '{}'", msg.sender_id)
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=effective_content,
@@ -894,6 +913,7 @@ class AgentLoop:
             is_master=is_master_context,
             current_user_id=msg.sender_id,
             sender_name=msg.metadata.get("sender_name", ""),
+            use_summary=use_cold_boot,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -1152,6 +1172,7 @@ class AgentLoop:
         chat_id: str = "direct",
         sender_id: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        is_system_internal: bool = False,
     ) -> str:
         """Process a message directly (for CLI, cron, or heartbeat usage).
         
@@ -1178,5 +1199,31 @@ class AgentLoop:
             logger.exception("Background session cleanup failed")
 
         msg = InboundMessage(channel=channel, sender_id=sender_id, chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg, 
+            session_key=session_key, 
+            on_progress=on_progress, 
+            is_system_internal=is_system_internal
+        )
         return response.content if response else ""
+
+    def _should_use_cold_boot(self, session: Session, current_message: str) -> bool:
+        """Ultra-lightweight intention routing to save LLM context window and TTFT.
+        Returns True if the message is short casual chat and history is sparse.
+        """
+        # If the user sends a long message, it likely requires full context/rules.
+        if len(current_message) > 40:
+            return False
+            
+        # Fast generic keywords bypass (meaning they likely need complex contexts)
+        magic_words = ["老板", "金总", "谁", "认识", "我是", "我叫", "名字", "职位", "重新", "什么", "怎么", "请教", "帮忙", "文档", "系统", "搜索", "你"]
+        for word in magic_words:
+            if word in current_message:
+                return False
+                
+        # If in a deep conversation block, context matters.
+        if len(session.messages) > 4:
+            return False
+            
+        # Short, possibly casual initiation like "hi", "hello", "在吗" -> use COLD BOOT (Summary only)
+        return True

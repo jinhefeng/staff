@@ -374,27 +374,72 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        prompt = (
-            f"【System Timer Triggered】\n"
-            f"The following scheduled task is due NOW:\n"
-            f"\"{job.payload.message}\"\n\n"
-            f"INSTRUCTION: Act immediately! Notify the user in a friendly manner or perform the task directly. "
-            f"CRITICAL: Do NOT use the cron tool to schedule this task again!"
+        if job.payload.stop_condition:
+            # PHASE 1: Arbitration (Only condition checking, no execution)
+            prompt_arbitrator = (
+                f"【System Timer Triggered: Arbitration Phase】\n"
+                f"Your scheduled job [{job.id}] is triggered.\n"
+                f"**Stop Condition check required:**\n"
+                f"You previously defined this semantic stop condition: \"{job.payload.stop_condition}\"\n\n"
+                f"INSTRUCTION:\n"
+                f"1. Use your available tools (which you pre-claimed: {job.payload.required_tools}) to verify if this condition is currently met.\n"
+                f"2. CRITICAL MATCHING RULE: You must be STRICT. Only output `[ACTION: STOP]` if the condition is explicitly and clearly met in the retrieved context. Do NOT guess or assume it is met. If the target string or intent is NOT found, it is NOT MET.\n"
+                f"3. If the condition IS MET (or you should stop the cycle), you MUST output exactly `[ACTION: STOP]` and nothing else.\n"
+                f"4. If the condition IS NOT MET, you MUST output exactly `[ACTION: CONTINUE]` and nothing else.\n"
+                f"CRITICAL: Do NOT execute the actual task in this step!"
+            )
+            response1 = await agent.process_direct(
+                prompt_arbitrator,
+                session_key=f"cron:{job.id}",
+                # Force arbitration internal logs to 'cli' to avoid noisy message hooks
+                channel="cli", 
+                chat_id="direct",
+                is_system_internal=True,
+            )
+            
+            is_stop = response1 and "[ACTION: STOP]" in response1
+            
+            from nanobot.bus.events import OutboundMessage
+            if is_stop:
+                # Silently remove the job
+                cron.remove_job(job.id)
+                if job.payload.deliver and job.payload.to:
+                    await bus.publish_outbound(OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=f"⏰ [系统提示] 定时任务 `{job.name}` 满足了终止条件，已自动销毁。"
+                    ))
+                return response1
+                
+            # If we reached here, condition IS NOT MET or it said CONTINUE.
+            # Proceed to Phase 2.
+            
+        # PHASE 2: Execution (either no stop_condition, or Arbitration said CONTINUE)
+        prompt_executor = (
+            f"【System Task Execution】\n"
+            f"Please execute the following scheduled task immediately:\n\n"
+            f"Task Content: \"{job.payload.task_content}\"\n\n"
+            f"INSTRUCTION: Act immediately! Notify the user in a friendly manner or perform the task directly.\n"
+            f"CRITICAL: Do NOT use the cron tool to schedule this task again! Do NOT output any internal [ACTION] tags."
         )
-        response = await agent.process_direct(
-            prompt,
+        
+        response2 = await agent.process_direct(
+            prompt_executor,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            is_system_internal=True,
         )
-        if job.payload.deliver and job.payload.to:
+        
+        if job.payload.deliver and job.payload.to and response2:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response or ""
+                content=response2.strip()
             ))
-        return response
+            
+        return response2
     cron.on_job = on_cron_job
     
     # Create channel manager
@@ -447,6 +492,7 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            is_system_internal=True,
         )
 
     async def on_heartbeat_notify(response: str) -> None:

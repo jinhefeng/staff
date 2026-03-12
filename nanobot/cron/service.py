@@ -98,7 +98,9 @@ class CronService:
                         ),
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),
-                            message=j["payload"].get("message", ""),
+                            task_content=j["payload"].get("task_content", j["payload"].get("message", "")), # Backwards compatibility
+                            stop_condition=j["payload"].get("stop_condition"),
+                            required_tools=j["payload"].get("required_tools", []),
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
@@ -145,7 +147,9 @@ class CronService:
                     },
                     "payload": {
                         "kind": j.payload.kind,
-                        "message": j.payload.message,
+                        "task_content": j.payload.task_content,
+                        "stop_condition": j.payload.stop_condition,
+                        "required_tools": j.payload.required_tools,
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
@@ -291,7 +295,9 @@ class CronService:
         self,
         name: str,
         schedule: CronSchedule,
-        message: str,
+        task_content: str,
+        stop_condition: str | None = None,
+        required_tools: list[str] | None = None,
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
@@ -309,7 +315,9 @@ class CronService:
             schedule=schedule,
             payload=CronPayload(
                 kind="agent_turn",
-                message=message,
+                task_content=task_content,
+                stop_condition=stop_condition,
+                required_tools=required_tools or [],
                 deliver=deliver,
                 channel=channel,
                 to=to,

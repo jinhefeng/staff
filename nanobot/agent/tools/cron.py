@@ -10,8 +10,9 @@ from nanobot.cron.types import CronSchedule
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
     
-    def __init__(self, cron_service: CronService):
+    def __init__(self, cron_service: CronService, available_tools: list[str] | None = None):
         self._cron = cron_service
+        self._available_tools = available_tools or []
         self._channel = ""
         self._chat_id = ""
     
@@ -27,10 +28,11 @@ class CronTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "MANDATORY: You MUST call this tool whenever the user asks you to set a reminder, alarm, "
-            "scheduled task, or a countdown/delayed action. Actions: add, list, remove.\n"
-            "CRITICAL RULE: Never just verbally agree to remind the user. You MUST call this tool "
-            "first to create a physical reminder before confirming to the user."
+            "MANDATORY: Call this tool for ANY scheduled tasks, reminders, or alarms.\n"
+            "CRITICAL: This is an Autonomous Cron Engine. For RECURRING tasks, you MUST define a `stop_condition` "
+            "and explicitly declare all `required_tools` you will need to evaluate that condition when you wake up. "
+            "If you lack the required tools to verify the stop condition, the schedule will be REJECTED. "
+            "Example: to stop when a user replies, you need a generic tool like `read_recent_messages`. If we don't have it, do not create."
         )
     
     @property
@@ -43,9 +45,18 @@ class CronTool(Tool):
                     "enum": ["add", "list", "remove"],
                     "description": "Action to perform"
                 },
-                "message": {
+                "task_content": {
                     "type": "string",
-                    "description": "Reminder message (for add)"
+                    "description": "What to do when triggered (e.g. 'Send a message to user X asking Y')"
+                },
+                "stop_condition": {
+                    "type": "string",
+                    "description": "Natural language condition evaluated to stop this recurring task (e.g. 'Check if user X has replied in the last 10 mins')"
+                },
+                "required_tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of tool names needed to evaluate the stop_condition and execute the task (e.g. ['send_cross_chat'])"
                 },
                 "every_seconds": {
                     "type": "integer",
@@ -78,7 +89,9 @@ class CronTool(Tool):
     async def execute(
         self,
         action: str,
-        message: str = "",
+        task_content: str = "",
+        stop_condition: str | None = None,
+        required_tools: list[str] | None = None,
         every_seconds: int | None = None,
         cron_expr: str | None = None,
         tz: str | None = None,
@@ -88,7 +101,7 @@ class CronTool(Tool):
         **kwargs: Any
     ) -> str:
         if action == "add":
-            return self._add_job(message, every_seconds, cron_expr, tz, at, delay_seconds)
+            return self._add_job(task_content, stop_condition, required_tools, every_seconds, cron_expr, tz, at, delay_seconds)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -97,15 +110,27 @@ class CronTool(Tool):
     
     def _add_job(
         self,
-        message: str,
+        task_content: str,
+        stop_condition: str | None,
+        required_tools: list[str] | None,
         every_seconds: int | None,
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
         delay_seconds: int | None = None,
     ) -> str:
-        if not message:
-            return "Error: message is required for add"
+        if not task_content:
+            return "Error: task_content is required for add"
+        
+        # Pre-flight Validation
+        required_tools = required_tools or []
+        missing_tools = [t for t in required_tools if t not in self._available_tools]
+        if missing_tools:
+            return (
+                f"Error: PRE-FLIGHT VALIDATION FAILED! You requested tools that are not currently mounted in the system: {missing_tools}. "
+                "You do NOT have the capability to independently evaluate your stop condition or execute this task. "
+                "Please adjust your plan, remove the dependency on these tools, or ask the user to mount the corresponding plugins first."
+            )
         if not self._channel or not self._chat_id:
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
@@ -138,9 +163,11 @@ class CronTool(Tool):
             return "Error: either every_seconds, cron_expr, delay_seconds, or at is required"
         
         job = self._cron.add_job(
-            name=message[:30],
+            name=task_content[:30],
             schedule=schedule,
-            message=message,
+            task_content=task_content,
+            stop_condition=stop_condition,
+            required_tools=required_tools,
             deliver=True,
             channel=self._channel,
             to=self._chat_id,

@@ -1,0 +1,2 @@
+name: check-changzhou-weather
+description: Check current weather in Changzhou using public API. If temp >10°C, send alert; if ≤10°C, send "好冷啊！". Use when system tools are unavailable. Executes: scripts/check_weather.sh, parses output, and sends appropriate message to 金鹤峰.

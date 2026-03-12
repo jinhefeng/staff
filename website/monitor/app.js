@@ -13,9 +13,11 @@ const elements = {
     statHeartbeat: document.getElementById('stat-heartbeat'),
     statSessions: document.getElementById('stat-sessions'),
     statDeferred: document.getElementById('stat-deferred'),
+    statCron: document.getElementById('stat-cron'),
     ticketList: document.getElementById('ticket-list'),
     heartbeatList: document.getElementById('heartbeat-list'),
     sessionList: document.getElementById('session-list'),
+    cronList: document.getElementById('cron-list'),
     eventList: document.getElementById('event-list')
 };
 
@@ -42,6 +44,7 @@ function renderDashboard(data) {
     elements.statHeartbeat.textContent = data.heartbeat.tasks.length;
     elements.statSessions.textContent = data.sessions.active_count;
     elements.statDeferred.textContent = data.deferred_tasks.length;
+    elements.statCron.textContent = data.cron_jobs ? data.cron_jobs.length : 0;
     
     const syncDate = new Date(data.last_updated);
     elements.lastSync.textContent = syncDate.toLocaleTimeString('zh-CN', { hour12: false });
@@ -86,6 +89,41 @@ function renderDashboard(data) {
         `;
         elements.sessionList.insertAdjacentHTML('beforeend', html);
     });
+
+    // Render Cron Jobs
+    if (elements.cronList) {
+        elements.cronList.innerHTML = (data.cron_jobs && data.cron_jobs.length) ? '' : '<div class="loading-placeholder">暂无定时任务</div>';
+        (data.cron_jobs || []).forEach(job => {
+            let nextRunStr = "N/A";
+            if (job.next_run_ms) {
+                const nowMs = Date.now();
+                const diffMs = job.next_run_ms - nowMs;
+                if (diffMs <= 0) {
+                    nextRunStr = "Running/Pending";
+                } else if (diffMs < 60000) {
+                    nextRunStr = `In ${Math.ceil(diffMs / 1000)}s`;
+                } else if (diffMs < 3600000) {
+                    nextRunStr = `In ${Math.ceil(diffMs / 60000)}m`;
+                } else {
+                    nextRunStr = new Date(job.next_run_ms).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+                }
+            }
+            
+            const html = `
+                <div class="cron-item ${!job.enabled ? 'disabled' : ''}">
+                    <div class="cron-header">
+                        <span class="cron-name">${escapeHTML(job.name || job.id)}</span>
+                        <span class="cron-next">${nextRunStr}</span>
+                    </div>
+                    <div class="cron-details">
+                        <span class="cron-schedule">${escapeHTML(job.schedule_text)}</span>
+                        ${job.stop_condition ? `<span class="cron-stop" title="Stop Condition">🛑 ${escapeHTML(job.stop_condition)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+            elements.cronList.insertAdjacentHTML('beforeend', html);
+        });
+    }
 
     // Render Events
     elements.eventList.innerHTML = data.events.length ? '' : '<div class="loading-placeholder">暂无系统动态</div>';

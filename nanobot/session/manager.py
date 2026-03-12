@@ -79,11 +79,11 @@ class Session:
         msg_count = len(sliced)
         for i, m in enumerate(sliced):
             role = m["role"]
-            content = m.get("content", "")
+            content = m.get("content") or ""
             
             # Smart truncation for historical tool results to save context
             # Skip truncation for the last 2 messages (likely current turn)
-            if i < msg_count - 2 and role == "tool" and len(content) > 1500:
+            if i < msg_count - 2 and role == "tool" and content and len(content) > 1500:
                 content = content[:1000] + "\n\n[... Content truncated for brevity by Staff context manager ...]"
 
             entry: dict[str, Any] = {"role": role, "content": content}

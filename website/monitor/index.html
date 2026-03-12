@@ -44,6 +44,10 @@
                 <label>近期会话</label>
                 <div class="value" id="stat-sessions">0</div>
             </div>
+            <div class="stat-card" style="border-top-color: var(--accent);">
+                <label>定时任务</label>
+                <div class="value" id="stat-cron">0</div>
+            </div>
             <div class="stat-card highlight">
                 <label>后台延迟项</label>
                 <div class="value" id="stat-deferred">0</div>
@@ -77,6 +81,15 @@
                     </div>
                     <div class="panel-body" id="session-list">
                         <!-- Sessions will be injected here -->
+                    </div>
+                </section>
+
+                <section class="panel mini-panel cron-panel">
+                    <div class="panel-header">
+                        <h2>定时任务 / CRON JOBS</h2>
+                    </div>
+                    <div class="panel-body scrollable" id="cron-list">
+                        <!-- Cron jobs will be injected here -->
                     </div>
                 </section>
             </aside>

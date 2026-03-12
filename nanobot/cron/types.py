@@ -22,7 +22,9 @@ class CronSchedule:
 class CronPayload:
     """What to do when the job runs."""
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
-    message: str = ""
+    task_content: str = ""
+    stop_condition: str | None = None
+    required_tools: list[str] = field(default_factory=list)
     # Deliver response to channel
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"

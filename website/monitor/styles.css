@@ -347,6 +347,68 @@ body {
     word-break: break-all;
 }
 
+/* Cron Panel */
+.cron-panel {
+    border-color: rgba(16, 185, 129, 0.2);
+}
+
+.cron-item {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    border-left: 3px solid var(--accent-green);
+    transition: background 0.2s ease;
+}
+
+.cron-item.disabled {
+    opacity: 0.5;
+    border-left-color: var(--text-secondary);
+}
+
+.cron-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.cron-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.cron-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.cron-next {
+    font-size: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent-amber);
+    background: rgba(245, 158, 11, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.cron-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.cron-schedule {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.cron-stop {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
 @media (max-width: 1280px) {
     .content-layout { grid-template-columns: 1fr 1fr; }
 }

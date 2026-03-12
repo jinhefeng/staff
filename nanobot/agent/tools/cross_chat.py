@@ -3,6 +3,7 @@
 Provides:
 - SearchContactsTool: Search organization directory for users/groups
 - SendCrossChatTool: Send messages to any user or group (trust score gated)
+- ReadRecentMessagesTool: Read recent messages from a target user/group's session
 """
 
 from __future__ import annotations
@@ -236,6 +237,74 @@ class SendCrossChatTool(Tool):
                 "Cross-chat message sent to {} {} by {}",
                 target_label, target_id, self._current_sender_id,
             )
-            return f"Message successfully sent to {target_label} {target_id}."
         except Exception as e:
             return f"Error sending cross-chat message: {e}"
+class ReadRecentMessagesTool(Tool):
+    """Read recent messages from a specific DingTalk user or group's session.
+    
+    Used by the Cron Arbitration engine to verify if a user has replied.
+    """
+
+    def __init__(self, workspace: Path):
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str:
+        return "read_recent_messages"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Read the most recent messages from a specific user or group's chat session. "
+            "Use this tool to verify stop conditions like 'Check if User X has replied in the last 10 minutes'. "
+            "It returns the last N lines of their conversation history, including timestamps and sender names."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target_id": {
+                    "type": "string",
+                    "description": "The target userId (for private chat) or openConversationId (for group chat)",
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of recent message lines to retrieve (default 30, max 100)",
+                    "default": 30,
+                },
+            },
+            "required": ["target_id"],
+        }
+
+    async def execute(
+        self,
+        target_id: str,
+        lines: int = 30,
+        **kwargs: Any,
+    ) -> str:
+        if not target_id:
+            return "Error: target_id is required."
+
+        lines = max(1, min(100, lines))
+        session_file = self._workspace / "sessions" / f"dingtalk:{target_id}.md"
+
+        if not session_file.exists():
+            return f"No recent chat history found for target '{target_id}' (Session file does not exist)."
+
+        try:
+            content = session_file.read_text(encoding="utf-8")
+            all_lines = content.splitlines()
+            recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            
+            if not recent_lines:
+                return f"Chat history for target '{target_id}' is empty."
+                
+            history_text = "\n".join(recent_lines)
+            return f"Recent chat history for target '{target_id}' (last {len(recent_lines)} lines):\n\n{history_text}"
+            
+        except Exception as e:
+            logger.error("Failed to read session file for target {}: {}", target_id, e)
+            return f"Error reading chat history: {e}"
+
