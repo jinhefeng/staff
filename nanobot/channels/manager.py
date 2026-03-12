@@ -97,6 +97,8 @@ class ChannelManager:
         if self.config.channels.dingtalk.enabled:
             try:
                 from nanobot.channels.dingtalk import DingTalkChannel
+                # Pass global debug_context setting
+                self.config.channels.dingtalk.debug_context = self.config.agents.defaults.debug_context
                 self.channels["dingtalk"] = DingTalkChannel(
                     self.config.channels.dingtalk, self.bus
                 )

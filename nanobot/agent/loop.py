@@ -1101,8 +1101,12 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
-            if role == "assistant" and not content and not entry.get("tool_calls"):
-                continue  # skip empty assistant messages — they poison session context
+            if role == "assistant":
+                if not content and not entry.get("tool_calls"):
+                    continue  # skip empty assistant messages — they poison session context
+                # 过滤推理内容，减小 Session 文件体积
+                entry.pop("reasoning_content", None)
+                entry.pop("thinking_blocks", None)
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":

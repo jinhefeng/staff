@@ -53,6 +53,7 @@ class DingTalkConfig(Base):
     client_secret: str = ""  # AppSecret
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
     master_ids: list[str] = Field(default_factory=list)  # Master user staff_ids (bypass security audit)
+    debug_context: bool = False  # Enable deep debugging for this channel
 
 
 class DiscordConfig(Base):
