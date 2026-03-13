@@ -1,28 +1,28 @@
 {
   "agents": {
     "defaults": {
-      "name": "nanobot",
+      "name": "赵小刀",
       "workspace": "./workspace",
-      "provider": "nvidia",
+      "provider": "nvidia-nemotron",
       "maxTokens": 8192,
       "temperature": 0.6,
       "maxToolIterations": 40,
       "memoryWindow": 30,
-      "sessionMaxMessages": 60,
+      "sessionMaxMessages": 180,
       "sessionClearToSize": 40,
+      "sessionSafeBuffer": 20,
       "sessionBackgroundMaxMessages": 100,
       "sessionBackgroundClearToSize": 50,
-      "sessionBackgroundCleanupDays": 15
-    }
-  },
-  "providers": {
-    "nvidia": {
-      "model": "nvidia/minimaxai/minimax-m2.5",
-      "apiKey": "请修改为您的 Nvidia API Key（与 model 对应）",
-      "apiBase": "https://integrate.api.nvidia.com/v1"
-    },
-    "gemini": {
-      "apiKey": "请修改为您的 Gemini API Key"
+      "sessionBackgroundCleanupDays": 15,
+      "debugContext": false,
+      "_comments": {
+        "memoryWindow": "归档触发阈值：未归档消息每达到此条数，则触发一次总结并清空到内存",
+        "sessionMaxMessages": "会话物理限制：Session 文件达到此条数时触发物理裁剪 (80->40)",
+        "sessionClearToSize": "裁剪保留数：物理裁剪后残留在 Session 文件中的消息数量",
+        "sessionSafeBuffer": "原始记录留存数：归档时强制在 Session 中保留的最近原文条目数",
+        "sessionBackgroundMaxMessages": "后台任务(Heartbeat/Cron)裁剪上限",
+        "sessionBackgroundClearToSize": "后台任务裁剪后保留数量"
+      }
     }
   },
   "channels": {
@@ -31,7 +31,57 @@
       "clientId": "在此填入您钉钉应用的 Client ID (AppKey)",
       "clientSecret": "在此填入您钉钉应用的 Client Secret (AppSecret)",
       "allowFrom": [],
-      "masterIds": []
+      "masterIds": [
+        "在此填入主人(Master)的钉钉 UserID"
+      ]
+    }
+  },
+  "providers": {
+    "nvidia-nemotron": {
+      "model": "nvidia/nemotron-3-nano-30b-a3b",
+      "apiKey": "在此填入您的 API Key",
+      "apiBase": "https://integrate.api.nvidia.com/v1",
+      "extraBody": {
+        "reasoning_budget": 16384,
+        "chat_template_kwargs": {
+          "enable_thinking": true
+        }
+      },
+      "toolUse": true
+    },
+    "gemini": {
+      "apiKey": "请修改为您的 Gemini API Key"
+    }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790,
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 600
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "在此填入您的 Search API Key (如 Google/Bing)",
+        "maxResults": 5
+      }
+    },
+    "exec": {
+      "timeout": 60,
+      "pathAppend": ""
+    },
+    "restrictToWorkspace": false,
+    "mcpServers": {
+      "engi_mcp": {
+        "url": "http://YOUR_SERVER_IP:PORT/sse",
+        "headers": {
+          "token": "YOUR_AUTH_TOKEN",
+          "Modeltype": "00"
+        },
+        "toolTimeout": 180
+      }
     }
   }
 }
