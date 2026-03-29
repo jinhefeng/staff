@@ -753,7 +753,11 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
         
         # --- Log Raw User Message to Shadow Log ---
-        self._log_raw_history(key, msg.model_dump())
+        # Handle dataclass serialization and datetime JSON compatibility
+        from dataclasses import asdict
+        msg_dict = asdict(msg)
+        msg_dict["timestamp"] = msg.timestamp.isoformat() if hasattr(msg.timestamp, "isoformat") else str(msg.timestamp)
+        self._log_raw_history(key, msg_dict)
 
         # Dynamically record group name for cross-chat search
         conv_type = msg.metadata.get("conversation_type")

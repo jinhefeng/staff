@@ -225,9 +225,32 @@ class ConsolidateMemoryTool(Tool):
             current_global = self._mem_store.read_global()
             current_guest, _ = self._mem_store.read_guest(current_user_id)
             
-            prompt_reduce = f"Merge facts:\n{chr(10).join(facts)}\nInto Global Knowledge (Master={is_master}) and Guest Sandbox ({current_user_id})."
+            prompt_reduce = f"""You are the Master Archive Editor. Deeply merge new factual fragments into the existing documents.
+
+## TARGET TEMPLATE STRUCTURE (MUST FOLLOW)
+1. YAML Header: TrustScore, Name, Email, Title, DeptPath, Alias, LastSyncDate.
+2. Section: ## 🎭 核心辨识与标签
+3. Section: ## 🛠️ 行为偏好与沟通禁忌 [Preferences]
+4. Section: ## 🛡️ 专属外交策略 [Tailored Narrative]
+5. Section: ## 📝 近期未决留存 [Unresolved Issues]
+
+## 1. Current Global Knowledge Base
+{current_global or "(empty)"}
+
+## 2. Current Exclusive Memory Sandbox for User {current_user_id}
+{current_guest}
+
+## 3. NEW Incremental Fact Deltas to Merge (MUST USE CHINESE)
+{chr(10).join([f"- {f}" for f in facts])}
+
+## Editing Directive
+- [LANGUAGE]: The output for Guest Sandbox MUST be in CHINESE.
+- [STRUCTURE]: You MUST maintain the 4 sections above. Do NOT output a simple list.
+- [DEDUPLICATION]: Merge new facts with existing ones. Paragraphs preferred over long lists.
+- [SAFETY]: Preserve YAML header. TrustScore must remain between 0-100.
+"""
             resp_reduce = await provider.chat(
-                messages=[{"role": "system", "content": "Rigorous archive editor."}, {"role": "user", "content": prompt_reduce}],
+                messages=[{"role": "system", "content": "Rigorous archive editor. Output in Chinese."}, {"role": "user", "content": prompt_reduce}],
                 tools=_MERGE_MEMORY_TOOL, model=model
             )
             
