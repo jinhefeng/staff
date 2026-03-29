@@ -1,3 +1,7 @@
+# Staff (赵小刀) - The Altered Ego
+
+**GitHub Repository:** [https://github.com/jinhefeng/staff](https://github.com/jinhefeng/staff)
+
 <div align="center">
   <img src="website/philosophy/assets/img/staff_philosophy_hero.png" width="400" alt="Staff Logo">
   <h1>Staff (赵小刀) - The Altered Ego</h1>

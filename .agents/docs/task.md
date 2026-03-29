@@ -365,20 +365,26 @@
 - [x] **子阶段 D：回归验收 (Verification)**
   - [x] 通过 CLI 或修改 JSON 模拟新建/删除定时任务，观察监控大屏是否做到即时响应。
 
-## 阶段四十五：LLM 输入载荷优化与交互去剧本化 (LLM Input & Interaction Optimization) [/]
-- [/] **第一阶段：基础清理与 Bug 修复 (Easy)** [/]
+## 阶段四十五：LLM 输入载荷优化与交互去剧本化 (LLM Input & Interaction Optimization) [x]
+- [x] **第一阶段：基础清理与 Bug 修复 (Easy)** [x]
     - [x] **Task 1.1: 修复 Metadata 注入 Bug (拦截机制优化)**
     - [x] **Task 1.2: 剔除失效 Skills 载荷 (Token 降噪)**
-- [ ] **第二阶段：人设去剧本化 (Medium)** [ ]
-    - [ ] **Task 2.1: 重写 `SOUL.md` (回归员工本质)**
-    - [ ] **Task 2.2: 重写 `AGENTS.md` (口语化准则)**
-    - [ ] **Task 2.3: 风格验证与回归测试**
-- [ ] **第三阶段：动态裁剪与分层控制 (Hard)** [ ]
-    - [ ] **Task 3.1: Master 模式 Prompt 动态精简**
+- [x] **第二阶段：人设去剧本化 (Medium)** [x]
+    - [x] **Task 2.1: 重写 `SOUL.md` (回归员工本质)**
+    - [x] **Task 2.2: 重写 `AGENTS.md` (口语化准则)**
+    - [x] **Task 2.3: 风格验证与回归测试**
+- [x] **第三阶段：动态裁剪与分层控制 (Hard)** [x]
+    - [x] **Task 3.1: Master 模式 Prompt 动态精简**
     - [x] **Task 3.2: 实施历史消息瘦身与时间感知同步** [x]
-        - [x] 开发 `relative_time` 标签注入逻辑并修复 ISO 解析 Bug。
-        - [x] 优化 `AgentLoop` I/O 锁粒度，移除并发存盘死锁点。
-    - [ ] **Task 3.3: 核心消息摘要压缩机制**
+    - [x] **Task 3.3: 核心消息摘要压缩机制**
+
+## 阶段四十七：记忆专家技能解耦与 RAG 架构重塑 (Phase 47: Memory Expert & RAG Refactor) [x]
+- [x] **方案定义与解耦设计**：确立“影子日志 (Shadow Log)” + “记忆专家技能”的冷热分离架构。
+- [x] **基础设施建设**：实现 `raw_history` 影子备份，确保对话 100% 物理留存。
+- [x] **技能封装与迁移**：创建 `staff_memory_expert` 技能，完成检索、画像读取及提纯逻辑的剥离。
+- [x] **内核瘦身与 RAG 切换**：修改 `ContextBuilder` 停止全量注入 Body，切换为工具驱动的按需调阅。
+- [x] **最终清理与归档**：物理删除内核冗余代码，收缩 Session 窗口（180->45）。
+
 
 ## 阶段四十六：设计变更提取与文档同步 (Extract-Design-Change) [x]
 - [x] 提取“时间感知标签”设计逻辑至 `session_management_spec.md`。

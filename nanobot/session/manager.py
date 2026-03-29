@@ -81,10 +81,11 @@ class Session:
             role = m["role"]
             content = m.get("content") or ""
             
-            # Smart truncation for historical tool results to save context
-            # Skip truncation for the last 2 messages (likely current turn)
-            if i < msg_count - 2 and role == "tool" and content and len(content) > 1500:
-                content = content[:1000] + "\n\n[... Content truncated for brevity by Staff context manager ...]"
+            # Ultra-aggressive truncation for historical tool results
+            # We keep full results for only the last 3 messages to preserve active reasoning.
+            if i < msg_count - 3 and role == "tool" and content:
+                if len(content) > 300:
+                    content = content[:150] + f"\n[... {len(content)-200} chars truncated for brevity ...]\n" + content[-50:]
 
             entry: dict[str, Any] = {"role": role, "content": content}
             for k in ("tool_calls", "tool_call_id", "name", "timestamp"):

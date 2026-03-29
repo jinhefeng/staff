@@ -169,20 +169,18 @@ class TicketManager:
         return False
 
     def get_summary(self, guest_id: str | None = None) -> str:
-        """Returns a concise summary of active tickets.
-        If guest_id is provided, only returns tickets related to that guest.
-        """
+        """Returns an ultra-concise summary of active ticket IDs and content."""
         filtered = []
         for tk, meta in self.tickets.items():
             if guest_id and meta.get("guest_id") != guest_id:
                 continue
-            # Keep summary concise
+            
             content = meta.get("content", "")
-            if len(content) > 60:
-                content = content[:57] + "..."
-            created = meta.get("created_at", "")[:16].replace("T", " ")
-            filtered.append(f"- [{tk}] {content} (Created: {created})")
+            # Remove redundant system fallback prefixes to save space
+            content = content.replace("[SYSTEM FALLBACK] User ", "").replace(" received a verbal promise from...", "")
+            if len(content) > 40:
+                content = content[:37] + "..."
+            
+            filtered.append(f"- {tk}: {content}")
 
-        if not filtered:
-            return "No active tickets."
-        return "\n".join(filtered)
+        return "\n".join(filtered) if filtered else "None."

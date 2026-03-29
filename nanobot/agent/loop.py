@@ -28,6 +28,7 @@ from nanobot.agent.tools.memory import MemorizeFactTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.utils.helpers import ensure_dir
 from nanobot.session.manager import Session, SessionManager
 from nanobot.agent.tickets import TicketManager
 from nanobot.agent.tools.tickets import EscalateToMasterTool, ResolveTicketTool
@@ -107,6 +108,7 @@ class AgentLoop:
         self._pre_process_hook = pre_process_hook
 
         self.sessions = session_manager or SessionManager(workspace)
+        self.raw_history_dir = ensure_dir(self.workspace / "sessions" / "raw_history")
         self.ticket_manager = TicketManager(workspace)
         self.context = ContextBuilder(workspace, agent_name=agent_name, ticket_manager=self.ticket_manager)
         self.tools = ToolRegistry()
@@ -148,6 +150,14 @@ class AgentLoop:
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        
+        # staff-memory-expert registration
+        from workspace.skills.staff_memory_expert.logic import SearchChatHistoryTool, QueryGlobalKnowledgeTool, ReadFullProfileTool, ConsolidateMemoryTool
+        self.tools.register(SearchChatHistoryTool(workspace=self.workspace))
+        self.tools.register(QueryGlobalKnowledgeTool(workspace=self.workspace))
+        self.tools.register(ReadFullProfileTool(workspace=self.workspace))
+        self.tools.register(ConsolidateMemoryTool(workspace=self.workspace))
+
         self.tools.register(MemorizeFactTool(workspace=self.workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
@@ -741,6 +751,9 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        
+        # --- Log Raw User Message to Shadow Log ---
+        self._log_raw_history(key, msg.model_dump())
 
         # Dynamically record group name for cross-chat search
         conv_type = msg.metadata.get("conversation_type")
@@ -861,6 +874,16 @@ class AgentLoop:
                 # Identity grants cross-chat permissions regardless of group context
                 cross_chat_tool.set_context(sender_id=msg.sender_id, is_master=is_master_identity)
 
+        if search_tool := self.tools.get("search_chat_history"):
+            from workspace.skills.staff_memory_expert.logic import SearchChatHistoryTool
+            if isinstance(search_tool, SearchChatHistoryTool):
+                search_tool.set_context(user_id=msg.sender_id, is_master=is_master_identity)
+
+        if profile_tool := self.tools.get("read_full_profile"):
+            from workspace.skills.staff_memory_expert.logic import ReadFullProfileTool
+            if isinstance(profile_tool, ReadFullProfileTool):
+                profile_tool.set_context(user_id=msg.sender_id, is_master=is_master_identity)
+
         history = session.get_history(max_messages=self.memory_window)
         
         # Scheme P: Skip input sanitizer for authorized internal system calls or Master identities
@@ -927,11 +950,6 @@ class AgentLoop:
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
-
-        # Persistence: Save assistant response and tool outputs to session
-        # The new ID-based anchoring handles alignment automatically.
-        self._save_turn(session, all_msgs, len(initial_messages))
-        self.sessions.save(session)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -1015,6 +1033,8 @@ class AgentLoop:
              all_msgs[-1].setdefault("metadata", {})["correlation_id"] = correlation_id
              if remote_msg_id:
                  all_msgs[-1]["metadata"]["dingtalk_msg_id"] = remote_msg_id
+             # Apply the audited/fallback content to the persistent history
+             all_msgs[-1]["content"] = final_content
 
         # 4. Save only new turns (Scheme N: ROLE ISOLATION)
         # Identify group scene (this info is transient in all_msgs metadata)
@@ -1095,39 +1115,55 @@ class AgentLoop:
             return True
         return False
 
+    def _log_raw_history(self, session_key: str, message: dict) -> None:
+        """Log raw conversation history in an append-only JSONL file (The Shadow Log)."""
+        import json
+        from nanobot.utils.helpers import safe_filename
+        safe_key = safe_filename(session_key.replace(":", "_"))
+        path = self.raw_history_dir / f"{safe_key}.jsonl"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+            
+            # --- 脱敏逻辑 (同时作用于 Session 和 Shadow Log) ---
             if role == "assistant":
                 if not content and not entry.get("tool_calls"):
-                    continue  # skip empty assistant messages — they poison session context
-                # 过滤推理内容，减小 Session 文件体积
+                    continue
+                # 剔除冗长的推理过程
                 entry.pop("reasoning_content", None)
                 entry.pop("thinking_blocks", None)
+            
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                     continue
-                if isinstance(content, list):
-                    entry["content"] = [
-                        {"type": "text", "text": "[image]"} if (
-                            c.get("type") == "image_url"
-                            and c.get("image_url", {}).get("url", "").startswith("data:image/")
-                        ) else c for c in content
-                    ]
+            
             entry.setdefault("timestamp", datetime.now().isoformat())
+            
+            # --- Task 1.2: Shadow Log Append-Only Storage (After cleanup) ---
+            self._log_raw_history(session.key, entry)
+            
+            # Save to active session
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
     async def _consolidate_memory(self, session, current_user_id: str = "Unknown", is_master: bool = False, is_master_identity: bool = False, archive_all: bool = False) -> bool:
-        """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        success = await MemoryStore(self.workspace).consolidate(
+        """Delegate consolidation to staff-memory-expert skill."""
+        consolidate_tool = self.tools.get("consolidate_memory")
+        if not consolidate_tool:
+            logger.error("ConsolidateMemoryTool not found in registry")
+            return False
+            
+        success = await consolidate_tool.run_consolidation(
             session, self.provider, self.model,
-            archive_all=archive_all, memory_window=self.memory_window,
+            memory_window=self.memory_window,
             current_user_id=current_user_id,
             is_master=is_master
         )

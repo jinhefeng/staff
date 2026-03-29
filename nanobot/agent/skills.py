@@ -106,34 +106,17 @@ class SkillsLoader:
     
     def build_skills_summary(self) -> str:
         """
-        Build a summary of available skills (name, description, path).
+        Build a ultra-compact summary of available skill names.
         
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed. Only skills with met
-        requirements are included to save tokens.
-        
-        Returns:
-            XML-formatted skills summary.
+        The agent can read the full skill content using read_file when needed. 
+        Only skills with met requirements are included to save tokens.
         """
         all_skills = self.list_skills(filter_unavailable=True)
         if not all_skills:
             return ""
         
-        def escape_xml(s: str) -> str:
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        
-        lines = ["<skills>"]
-        for s in all_skills:
-            name = escape_xml(s["name"])
-            desc = escape_xml(self._get_skill_description(s["name"]))
-            
-            lines.append(f"  <skill available=\"true\">")
-            lines.append(f"    <name>{name}</name>")
-            lines.append(f"    <description>{desc}</description>")
-            lines.append(f"  </skill>")
-        lines.append("</skills>")
-        
-        return "\n".join(lines)
+        names = [s["name"] for s in all_skills]
+        return f"Available Skills: {', '.join(names)}"
     
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""

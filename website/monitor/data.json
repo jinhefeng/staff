@@ -1,8 +1,27 @@
 {
-  "last_updated": "2026-03-13T00:43:26.472416",
+  "last_updated": "2026-03-30T02:24:41.864518",
   "tickets": {
-    "total_active": 0,
-    "items": []
+    "total_active": 3,
+    "items": [
+      {
+        "id": "TKT-8A096454",
+        "guest": "金鹤峰",
+        "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: 了解，正在检查电源状态，稍后向您汇报。如有其他需求，请随时告知。",
+        "created_at": "2026-03-30T00:30:14.507855"
+      },
+      {
+        "id": "TKT-29742B5A",
+        "guest": "金鹤峰",
+        "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: 抱歉您的感受，我们会尽快核实并改进。请问有什么具体问题或需要帮助的地方？",
+        "created_at": "2026-03-30T00:44:04.190441"
+      },
+      {
+        "id": "TKT-050385D1",
+        "guest": "金鹤峰",
+        "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: 抱歉，我没有及时注意到您对“减少”这一词的更正。在每一次交互中，我会基于您最近的输入来生成回答，如果更正的内容没有明确标注或没有触发特定的指令，我可能会把注意力放在先前的上下文上，从而没有立刻作出回应。\n\n现在您已经把“减少”改回正确的用词，我完全可以继续为您提供答案或进一步的解释。请告诉我您接下来想了解或需要帮助的具体内容，我会立刻为您继续回答。再次抱歉造成的困扰，感谢您的耐心提醒！",
+        "created_at": "2026-03-30T01:04:24.805694"
+      }
+    ]
   },
   "heartbeat": {
     "tasks": []
@@ -12,8 +31,8 @@
     "recent": [
       {
         "name": "dingtalk_014224562537153949.jsonl",
-        "last_modified": "2026-03-13T00:40:40.928021",
-        "msg_count": 5
+        "last_modified": "2026-03-30T02:23:17.242602",
+        "msg_count": 104
       },
       {
         "name": "heartbeat.jsonl",

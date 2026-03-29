@@ -33,6 +33,7 @@ class ContextBuilder:
         current_user_id: str = "",
         use_summary: bool = False
     ) -> str:
+        # Get memory metadata (YAML header/Summary) but NOT the full body
         memory = self.memory.get_memory_context(
             is_master=is_master, 
             current_user_id=current_user_id, 
@@ -46,7 +47,7 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         if memory:
-            parts.append(f"# Memory\n\n{memory}")
+            parts.append(f"# Identity & Rules Snapshot\n\n{memory}\n\n**注意**: 以上仅为身份快照或索引。如需查询全局知识、完整规章或详细历史细节，请务必使用 `staff_memory_expert` 技能。")
 
         # Inject Ticket Summary
         # For Master, show all. For Guests, show only their own (or generic info).
@@ -66,37 +67,27 @@ class ContextBuilder:
         return "\n\n---\n\n".join(parts)
     
     def _get_identity(self, is_master: bool = False, memory_context: str = "", current_user_id: str = "") -> str:
-        """Get the core identity section — metadata only."""
-        workspace_path = str(self.workspace.expanduser().resolve())
-        project_root = str(Path(workspace_path).parent)
-        builtin_skills_path = str(Path(project_root) / "nanobot" / "skills")
-        system = platform.system()
-        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.python_version()}"
+        """Get the core identity section — compact metadata."""
+        mode_label = "【首长模式 (MASTER)】" if is_master else "【访客模式 (GUEST)】"
         
-        mode_label = "【首长模式 (MASTER MODE)】" if is_master else "【访客模式 (GUEST MODE)】"
+        # Compact Path Map
+        paths = [
+            f"Workspace: {self.workspace.resolve()}",
+            f"Global: memory/core/global.md",
+            f"Guest: memory/guests/{{user_id}}.md",
+            f"ShadowLogs: sessions/raw_history/{{chat_id}}.jsonl"
+        ]
 
         return f"""# {self.agent_name} 🐈
+Role: 专业数字幕僚 (Professional Digital Staff)
+Mode: {mode_label}
+OS: {platform.system()}
 
-你是 {self.agent_name}，一名专业、可靠且高效的数字幕僚。
-当前处于 {mode_label}。
+## Paths (Relative to Workspace)
+- {" | ".join(paths)}
 
-## Runtime
-{runtime}
-
-## 环境与路径 (Environment & Paths)
-- Root: {project_root}
-- Workspace: {workspace_path}
-- Global Memory: {workspace_path}/memory/core/global.md
-- Guest Memory: {workspace_path}/memory/guests/{{user_id}}.md
-- History: {workspace_path}/memory/HISTORY.md
-- Tickets: {workspace_path}/tickets/active_tickets.json
-- Heartbeat: {workspace_path}/HEARTBEAT.md
-
-### 技能路径 (Skills)
-- Built-in: {builtin_skills_path}/{{name}}/SKILL.md
-- Custom: {workspace_path}/skills/{{name}}/SKILL.md
-
-**注意**: 详细的行为准则、工具调用红线、岗位 SOP 已加载于下方的引导文件中。请务必优先遵循已加载的指令。"""
+**指令优先级**: 优先遵循下方加载的行为准则与工具红线。
+"""
 
     def _get_missing_info_pillars(self, memory: str) -> list[str]:
         """Identifies which core profile pillars are missing based on placeholders."""
@@ -181,28 +172,29 @@ class ContextBuilder:
         sender_name: str = "",
         use_summary: bool = False,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
+        """Build the complete message list for an LLM call - No Barrier version."""
         
-        # Scheme Q (Literal Multi-part Structure):
-        # 1. 历史存档 (history)
-        # 2. 运行时上下文 (Runtime Context)
-        # 3. 最后一回合消息 (lastMsg)
+        # 1. Base System Prompt
+        system_prompt = self.build_system_prompt(skill_names, is_master, current_user_id, use_summary=use_summary)
         
+        # 2. Append Runtime Context to System Prompt (Preventing it from becoming a separator)
+        runtime_context = self._build_runtime_context(channel, chat_id, sender_name=sender_name)
+        full_system_content = f"{system_prompt}\n\n---\n\n{runtime_context}"
+        
+        # 3. Clean and process History
         clean_history = []
         for m in history:
             msg = dict(m)
-            # 消除重复：如果历史里已经存了当前消息（从 loop.py 的即时存盘逻辑而来），切除它
+            # Duplicate cleanup
             if msg.get("role") == "user" and msg.get("content") == current_message and m == history[-1]:
                 continue
             
-            # 注入相对时间权重标签
             ts_label = self._format_relative_time(msg.get("timestamp", ""))
             if ts_label:
                 content = msg.get("content")
                 if isinstance(content, str):
                     msg["content"] = f"{ts_label} {content}"
                 elif isinstance(content, list):
-                    # 处理带媒体的复杂消息结构
                     new_content = []
                     for part in content:
                         new_part = dict(part)
@@ -211,18 +203,14 @@ class ContextBuilder:
                         new_content.append(new_part)
                     msg["content"] = new_content
             
-            # 移除 LLM 不需要的时间戳字段，保持 Payload 干净
             msg.pop("timestamp", None)
             clean_history.append(msg)
 
-        # 按照用户要求的“正确结构”拼接消息列表
-        runtime_context = self._build_runtime_context(channel, chat_id, sender_name=sender_name)
-        
+        # 4. Final Assembly (Direct flow: System -> History -> User)
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, is_master, current_user_id, use_summary=use_summary)},
+            {"role": "system", "content": full_system_content},
             *clean_history,
-            {"role": "system", "content": runtime_context}, # 独立节点: Runtime Context (使用 system 角色防止与下一条 user 合并)
-            {"role": "user", "content": self._build_user_content(current_message, media)} # 独立节点: lastMsg
+            {"role": "user", "content": self._build_user_content(current_message, media)}
         ]
         
         return messages
