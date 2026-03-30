@@ -60,7 +60,7 @@ class SearchChatHistoryTool(Tool):
                 if kw in str(msg.get("content", "")).lower():
                     start, end = max(0, i - context_lines), min(len(messages), i + context_lines + 1)
                     snippet = messages[start:end]
-                    res = [f"{'>> ' if s == msg else '   '}[{s['role'].upper()}]: {s.get('content', '')}" for s in snippet]
+                    res = [f"{'>> ' if s == msg else '   '}[{str(s.get('role', 'UNKNOWN')).upper()}]: {s.get('content', '')}" for s in snippet]
                     results.append(f"--- Match at {msg.get('timestamp', '')[:16]} ---\n" + "\n".join(res))
             return "\n\n".join(results[:5]) if results else f"No matches for '{keyword}'."
         except Exception as e: return f"Error: {e}"

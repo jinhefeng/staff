@@ -275,8 +275,11 @@ class LiteLLMProvider(LLMProvider):
                 if isinstance(args, str):
                     args = json_repair.loads(args)
                 
+                # Priority: tc.id (from provider) > generated ID
+                tool_id = getattr(tc, "id", None) or _short_tool_id()
+                
                 tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
+                    id=tool_id,
                     name=tc.function.name,
                     arguments=args,
                 ))
