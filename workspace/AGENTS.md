@@ -6,7 +6,6 @@
 
 ## 2. 物理操作 (Action)
 - 收到时间约定：必须立即调用 `cron`。
-- 承诺后续处理：必须立即调用 `defer_to_background`。
 
 ## 3. 记忆检索 (Memory RAG)
 - 历史回溯：使用 `search_chat_history` 检索影子日志。

@@ -60,6 +60,66 @@
       "createdAtMs": 1774850931284,
       "updatedAtMs": 1774850931284,
       "deleteAfterRun": true
+    },
+    {
+      "id": "fe51d7e9",
+      "name": "创建钉钉日程：标题=需求确认会一一; 参与者=我; 开始=2",
+      "enabled": true,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1774863000000,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "task_content": "创建钉钉日程：标题=需求确认会一一; 参与者=我; 开始=2026-03-30 17:30; 结束=2026-03-30 18:30; 备注=请带好计算机",
+        "stop_condition": null,
+        "required_tools": [],
+        "deliver": true,
+        "channel": "dingtalk",
+        "to": "014224562537153949"
+      },
+      "state": {
+        "nextRunAtMs": 1774863000000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null
+      },
+      "createdAtMs": 1774852247147,
+      "updatedAtMs": 1774852247147,
+      "deleteAfterRun": true
+    },
+    {
+      "id": "0b782eac",
+      "name": "给用户 我 发送提醒：需求确认会一一将在15分钟后开始，请带",
+      "enabled": true,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1774862100000,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "task_content": "给用户 我 发送提醒：需求确认会一一将在15分钟后开始，请带好计算机",
+        "stop_condition": null,
+        "required_tools": [],
+        "deliver": true,
+        "channel": "dingtalk",
+        "to": "014224562537153949"
+      },
+      "state": {
+        "nextRunAtMs": 1774862100000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null
+      },
+      "createdAtMs": 1774852253159,
+      "updatedAtMs": 1774852253159,
+      "deleteAfterRun": true
     }
   ]
 }

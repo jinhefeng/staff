@@ -1,3 +1,7 @@
+---
+description: Fetch real-time stock data for Chinese A-share companies.
+metadata: {"nanobot": {"always": false}}
+---
 # Stock Analysis Skill
 
 ## Purpose

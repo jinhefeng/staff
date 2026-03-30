@@ -1,3 +1,7 @@
+---
+description: Securely fetch DingTalk calendar events for authorized users.
+metadata: {"nanobot": {"always": false}}
+---
 # DingTalk Calendar Skill
 
 ## Purpose

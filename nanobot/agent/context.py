@@ -75,6 +75,7 @@ class ContextBuilder:
             f"Workspace: {self.workspace.resolve()}",
             f"Global: memory/core/global.md",
             f"Guest: memory/guests/{{user_id}}.md",
+            f"Skills: skills/{{name}}/SKILL.md",
             f"ShadowLogs: sessions/raw_history/{{chat_id}}.jsonl"
         ]
 

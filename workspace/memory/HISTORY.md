@@ -26,3 +26,7 @@
 
 [2026-03-30 14:05] The user asks to add participant 李金菱 to the test schedule and to send a notification 15 minutes before the 17:00 start time.
 
+[2026-03-30 14:07] User wants to add participant 李金菱 to the schedule and receive a reminder 15 minutes before start; assistant cannot find the contact and requests accurate user ID.
+
+[2026-03-30 13:48] User requested an immediate reminder for a schedule set for 2026-03-30 17:00 with participant Li Jinlín added; the assistant had scheduled a 16:45 reminder and now the user asks to send it now.
+

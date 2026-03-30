@@ -977,36 +977,6 @@ class AgentLoop:
             if final_content != audited_content:
                 outbound_content = audited_content
 
-            # ANTI-LIP-SERVICE (Promise Checker)
-            # Only check if NO tools were actually used in this loop iteration (or only messaging tools)
-            has_action_tools = any(t not in ("message", "escalate_to_master") for t in tools_used)
-            if not has_action_tools and is_master_identity:
-                t_prom = time.monotonic()
-                is_lip_service = await sanitizer.check_promise_intent(msg.content, final_content)
-                logger.info("Promise intent check tool {:.1f}s -> {}", time.monotonic() - t_prom, is_lip_service)
-                if is_lip_service:
-                    # The agent made a promise but took no action. Force fallback!
-                    fallback_msg = "\n\n【系统拦截】：检测到口头承诺但未立刻执行动作。已自动挂载后台工单，将在闲暇时异步处理。"
-                    final_content += fallback_msg
-                    
-                    # Create the ticket programmatically
-                    guest_name = msg.metadata.get("sender_name", msg.sender_id)
-                    logger.warning("Agent made an empty promise. Creating fallback ticket for {}", guest_name)
-                    self.ticket_manager.create_ticket(
-                        guest_id=msg.sender_id,
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"[SYSTEM FALLBACK] User {guest_name} received a verbal promise from the agent but no action was taken.\nAgent response: {audited_content}",
-                        guest_name=guest_name
-                    )
-
-                    if all_msgs and all_msgs[-1]["role"] == "assistant":
-                        all_msgs[-1]["content"] = final_content
-                    
-                    # If sanitized/audited or fallback warning injected, it only goes to outbound_content
-                    # while the clean final_content stays in all_msgs for session saving.
-                    outbound_content = final_content
-
         import uuid
         correlation_id = str(uuid.uuid4())
         

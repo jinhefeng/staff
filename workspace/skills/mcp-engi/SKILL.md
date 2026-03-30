@@ -1,3 +1,8 @@
+---
+name: mcp-engi
+description: 封装MCP-ENGI供热系统接口，提供标准化调用方式与常用分析模板。
+metadata: {"nanobot": {"always": false}}
+---
 name: mcp-engi
 description: 封装MCP-ENGI供热系统接口，提供标准化调用方式与常用分析模板。适用于：查询热力站实时/历史数据、排序TOP N站点、生成负荷预测、验证token有效性等。触发场景：当用户要求分析热力站温度、流量、负荷、二次供温排名、热网预测等MCP系统数据时使用。
 

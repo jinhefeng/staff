@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-30T14:18:44.580817",
+  "last_updated": "2026-03-30T15:32:52.269333",
   "tickets": {
     "total_active": 6,
     "items": [
@@ -49,8 +49,8 @@
     "recent": [
       {
         "name": "dingtalk_014224562537153949.jsonl",
-        "last_modified": "2026-03-30T14:17:05.462794",
-        "msg_count": 46
+        "last_modified": "2026-03-30T14:49:11.912986",
+        "msg_count": 86
       },
       {
         "name": "cron_597e58df.jsonl",
@@ -78,6 +78,24 @@
       "stop_condition": null,
       "to_target": "014224562537153949",
       "next_run_ms": 1774860300000
+    },
+    {
+      "id": "fe51d7e9",
+      "name": "创建钉钉日程：标题=需求确认会一一; 参与者=我; 开始=2",
+      "enabled": true,
+      "schedule_text": "在 1774863000000",
+      "stop_condition": null,
+      "to_target": "014224562537153949",
+      "next_run_ms": 1774863000000
+    },
+    {
+      "id": "0b782eac",
+      "name": "给用户 我 发送提醒：需求确认会一一将在15分钟后开始，请带",
+      "enabled": true,
+      "schedule_text": "在 1774862100000",
+      "stop_condition": null,
+      "to_target": "014224562537153949",
+      "next_run_ms": 1774862100000
     }
   ],
   "events": []
