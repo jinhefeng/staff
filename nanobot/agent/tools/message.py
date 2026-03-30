@@ -1,5 +1,6 @@
 """Message tool for sending messages to users."""
 
+import uuid
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
@@ -21,6 +22,7 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._last_correlation_id: str | None = None
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -35,6 +37,7 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+        self._last_correlation_id = None
 
     @property
     def name(self) -> str:
@@ -89,6 +92,9 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        correlation_id = str(uuid.uuid4())
+        self._last_correlation_id = correlation_id
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
@@ -96,7 +102,8 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
-            }
+            },
+            correlation_id=correlation_id
         )
 
         try:

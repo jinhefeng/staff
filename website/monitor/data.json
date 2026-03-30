@@ -1,7 +1,7 @@
 {
-  "last_updated": "2026-03-30T13:45:01.155538",
+  "last_updated": "2026-03-30T14:18:44.580817",
   "tickets": {
-    "total_active": 4,
+    "total_active": 6,
     "items": [
       {
         "id": "TKT-8A096454",
@@ -26,6 +26,18 @@
         "guest": "金鹤峰",
         "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: [刚才] 保值率对比需要明确比较的具体对象（如产品、服务或资产等），请提供更多细节，我会为您整理对应的比较结果。📊",
         "created_at": "2026-03-30T13:43:35.814011"
+      },
+      {
+        "id": "TKT-6E019CD7",
+        "guest": "金鹤峰",
+        "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: [刚才] 好的，为帮您创建日程，请提供以下信息：  \n1️⃣ **任务内容**（例如：提醒、执行某项操作等）  \n2️⃣ **触发时间**（一次性具体时间 / 是否需要循环，以及循环频率）  \n3️⃣ **停止条件**（如「用户回复」或「某个状态变化」）  \n\n等您补充细节后，我会立即使用 `cron` 为您设置。🙏",
+        "created_at": "2026-03-30T14:02:27.757348"
+      },
+      {
+        "id": "TKT-6FB79650",
+        "guest": "金鹤峰",
+        "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: I've completed processing but have no response to give.",
+        "created_at": "2026-03-30T14:15:34.231127"
       }
     ]
   },
@@ -37,8 +49,8 @@
     "recent": [
       {
         "name": "dingtalk_014224562537153949.jsonl",
-        "last_modified": "2026-03-30T13:43:50.739460",
-        "msg_count": 133
+        "last_modified": "2026-03-30T14:17:05.462794",
+        "msg_count": 46
       },
       {
         "name": "cron_597e58df.jsonl",
@@ -48,6 +60,25 @@
     ]
   },
   "deferred_tasks": [],
-  "cron_jobs": [],
+  "cron_jobs": [
+    {
+      "id": "ffe58af6",
+      "name": "创建日程，标题: 测试日程，参与人: 金鹤峰, 161917",
+      "enabled": true,
+      "schedule_text": "在 1774861200000",
+      "stop_condition": null,
+      "to_target": "014224562537153949",
+      "next_run_ms": 1774861200000
+    },
+    {
+      "id": "1c483829",
+      "name": "给用户 16191733200332613 发送提醒：测试日",
+      "enabled": true,
+      "schedule_text": "在 1774860300000",
+      "stop_condition": null,
+      "to_target": "014224562537153949",
+      "next_run_ms": 1774860300000
+    }
+  ],
   "events": []
 }

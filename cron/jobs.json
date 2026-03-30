@@ -1,4 +1,65 @@
 {
   "version": 1,
-  "jobs": []
+  "jobs": [
+    {
+      "id": "ffe58af6",
+      "name": "创建日程，标题: 测试日程，参与人: 金鹤峰, 161917",
+      "enabled": true,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1774861200000,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "task_content": "创建日程，标题: 测试日程，参与人: 金鹤峰, 16191733200332613",
+        "stop_condition": null,
+        "required_tools": [],
+        "deliver": true,
+        "channel": "dingtalk",
+        "to": "014224562537153949"
+      },
+      "state": {
+        "nextRunAtMs": 1774861200000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null
+      },
+      "createdAtMs": 1774850923546,
+      "updatedAtMs": 1774850923546,
+      "deleteAfterRun": true
+    },
+    {
+      "id": "1c483829",
+      "name": "给用户 16191733200332613 发送提醒：测试日",
+      "enabled": true,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1774860300000,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "task_content": "给用户 16191733200332613 发送提醒：测试日程将在15分钟后开始，请准备参加",
+        "stop_condition": null,
+        "required_tools": [],
+        "deliver": true,
+        "channel": "dingtalk",
+        "to": "014224562537153949"
+      },
+      "state": {
+        "nextRunAtMs": 1774860300000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null
+      },
+      "createdAtMs": 1774850931284,
+      "updatedAtMs": 1774850931284,
+      "deleteAfterRun": true
+    }
+  ]
 }

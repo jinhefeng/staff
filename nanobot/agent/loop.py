@@ -1031,10 +1031,18 @@ class AgentLoop:
                 logger.info("Successfully received remote ID {} for {}", remote_msg_id, correlation_id)
             else:
                 logger.warning("Timed out waiting for receipt for {}. Saving without remote ID.", correlation_id)
+        else:
+            # Scheme N: Handle Tool-based message receipt
+            if hasattr(mt, "_last_correlation_id") and mt._last_correlation_id:
+                tool_corr_id = mt._last_correlation_id
+                logger.info("Waiting for Tool-receipt ID for correlation_id={}...", tool_corr_id)
+                remote_msg_id = await self.bus.wait_for_receipt(tool_corr_id, timeout=3.0)
+                if remote_msg_id:
+                    logger.info("Successfully received Tool-remote ID {} for {}", remote_msg_id, tool_corr_id)
 
         # 3. Inject IDs into metadata before saving to session
         if all_msgs and all_msgs[-1]["role"] == "assistant":
-             all_msgs[-1].setdefault("metadata", {})["correlation_id"] = correlation_id
+             all_msgs[-1].setdefault("metadata", {})["correlation_id"] = (mt._last_correlation_id if is_msg_tool else correlation_id)
              if remote_msg_id:
                  all_msgs[-1]["metadata"]["dingtalk_msg_id"] = remote_msg_id
              # Apply the audited/fallback content to the persistent history
@@ -1120,26 +1128,47 @@ class AgentLoop:
         return False
 
     def _log_raw_history(self, session_key: str, message: dict) -> None:
-        """Log raw conversation history in an append-only JSONL file (The Shadow Log)."""
+        """Log conversation history in an append-only JSONL file (The Shadow Log).
+        
+        This version is optimized for human reading:
+        - Skips 'tool' role messages.
+        - Strips 'tool_calls' from 'assistant' messages.
+        """
+        role = message.get("role")
+        
+        # 1. 彻底不记录 tool 角色的回复 (人类不需要看)
+        if role == "tool":
+            return
+            
+        clean_msg = dict(message)
+        
+        # 2. 剔除助手消息中的 tool_calls 技术细节 (保持日志纯净)
+        if role == "assistant" and "tool_calls" in clean_msg:
+            # 如果助手既有文字又有 tool_calls，只保留文字
+            # 如果助手只有 tool_calls (中间步骤)，则不记录到日志，避免出现 content: null
+            if not clean_msg.get("content"):
+                return
+            clean_msg.pop("tool_calls", None)
+
         import json
         from nanobot.utils.helpers import safe_filename
         safe_key = safe_filename(session_key.replace(":", "_"))
         path = self.raw_history_dir / f"{safe_key}.jsonl"
         with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+            f.write(json.dumps(clean_msg, ensure_ascii=False) + "\n")
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+        """Save new-turn messages into session and shadow log with divergent logic."""
         from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
             
-            # --- 脱敏逻辑 (同时作用于 Session 和 Shadow Log) ---
+            # --- 数据脱敏/压缩 ---
             if role == "assistant":
                 if not content and not entry.get("tool_calls"):
                     continue
-                # 剔除冗长的推理过程
+                # 剔除冗长的思维链，节省内存
                 entry.pop("reasoning_content", None)
                 entry.pop("thinking_blocks", None)
             
@@ -1151,11 +1180,13 @@ class AgentLoop:
             
             entry.setdefault("timestamp", datetime.now().isoformat())
             
-            # --- Task 1.2: Shadow Log Append-Only Storage (After cleanup) ---
+            # --- 分支 1: 写入影子日志 (面向主人：极致纯净，剔除所有技术噪音) ---
             self._log_raw_history(session.key, entry)
             
-            # Save to active session
+            # --- 分支 2: 保存到实时会话 (面向机器：保留逻辑链，支持 tool 记录) ---
+            # 注意：此处不再 continue，确保 role: tool 也能进入 session.messages
             session.messages.append(entry)
+            
         session.updated_at = datetime.now()
 
     async def _consolidate_memory(self, session, current_user_id: str = "Unknown", is_master: bool = False, is_master_identity: bool = False, archive_all: bool = False) -> bool:

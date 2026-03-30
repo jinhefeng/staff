@@ -38,5 +38,25 @@
     "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: [刚才] 保值率对比需要明确比较的具体对象（如产品、服务或资产等），请提供更多细节，我会为您整理对应的比较结果。📊",
     "created_at": "2026-03-30T13:43:35.814011",
     "pacified": false
+  },
+  "TKT-6E019CD7": {
+    "ticket_id": "TKT-6E019CD7",
+    "guest_id": "014224562537153949",
+    "guest_name": "金鹤峰",
+    "guest_channel": "dingtalk",
+    "guest_chat_id": "014224562537153949",
+    "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: [刚才] 好的，为帮您创建日程，请提供以下信息：  \n1️⃣ **任务内容**（例如：提醒、执行某项操作等）  \n2️⃣ **触发时间**（一次性具体时间 / 是否需要循环，以及循环频率）  \n3️⃣ **停止条件**（如「用户回复」或「某个状态变化」）  \n\n等您补充细节后，我会立即使用 `cron` 为您设置。🙏",
+    "created_at": "2026-03-30T14:02:27.757348",
+    "pacified": false
+  },
+  "TKT-6FB79650": {
+    "ticket_id": "TKT-6FB79650",
+    "guest_id": "014224562537153949",
+    "guest_name": "金鹤峰",
+    "guest_channel": "dingtalk",
+    "guest_chat_id": "014224562537153949",
+    "content": "[SYSTEM FALLBACK] User 金鹤峰 received a verbal promise from the agent but no action was taken.\nAgent response: I've completed processing but have no response to give.",
+    "created_at": "2026-03-30T14:15:34.231127",
+    "pacified": false
   }
 }
