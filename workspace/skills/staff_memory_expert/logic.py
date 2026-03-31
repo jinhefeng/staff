@@ -263,7 +263,7 @@ class ConsolidateMemoryTool(Tool):
                 if global_upd := args_red.get("global_knowledge_update"):
                     # Basic Master protection check here or in Skill logic
                     if is_master or "1. Master 认定的绝对真相" not in current_global:
-                         self._mem_store.write_global(global_upd)
+                         await self._mem_store.write_global(global_upd)
             return True
         except Exception as e:
             logger.error("Skill consolidation failed: {}", e)

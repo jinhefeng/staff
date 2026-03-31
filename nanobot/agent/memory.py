@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -89,6 +90,8 @@ _PRUNE_MEMORY_TOOL = [
 class MemoryStore:
     """Federated memory: core/global.md (long-term facts) + guests/{user_id}.md (isolated sandbox + trust)."""
 
+    _global_resource_lock = asyncio.Lock()  # Class-level lock shared by all instances
+
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.core_dir = ensure_dir(self.memory_dir / "core")
@@ -105,22 +108,24 @@ class MemoryStore:
                 pass
         return {}
 
-    def save_group_info(self, group_id: str, title: str) -> None:
+    async def save_group_info(self, group_id: str, title: str) -> None:
         """Dynamically save group title & ID for cross-chat targeting."""
-        groups = self.load_groups()
-        orig = groups.get(group_id)
-        if orig != title:
-            groups[group_id] = title
-            self.groups_file.write_text(json.dumps(groups, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.debug("Saved group info: {} ({})", title, group_id)
+        async with self._global_resource_lock:
+            groups = self.load_groups()
+            orig = groups.get(group_id)
+            if orig != title:
+                groups[group_id] = title
+                self.groups_file.write_text(json.dumps(groups, ensure_ascii=False, indent=2), encoding="utf-8")
+                logger.debug("Saved group info: {} ({})", title, group_id)
 
     def read_global(self) -> str:
         if self.global_file.exists():
             return self.global_file.read_text(encoding="utf-8")
         return ""
 
-    def write_global(self, content: str) -> None:
-        self.global_file.write_text(content, encoding="utf-8")
+    async def write_global(self, content: str) -> None:
+        async with self._global_resource_lock:
+            self.global_file.write_text(content, encoding="utf-8")
         
     def _get_guest_file(self, user_id: str) -> Path:
         safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', user_id)

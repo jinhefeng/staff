@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-30T15:32:52.269333",
+  "last_updated": "2026-03-31T08:49:22.733683",
   "tickets": {
     "total_active": 6,
     "items": [
@@ -45,12 +45,37 @@
     "tasks": []
   },
   "sessions": {
-    "active_count": 2,
+    "active_count": 7,
     "recent": [
       {
         "name": "dingtalk_014224562537153949.jsonl",
-        "last_modified": "2026-03-30T14:49:11.912986",
-        "msg_count": 86
+        "last_modified": "2026-03-31T08:47:47.737177",
+        "msg_count": 79
+      },
+      {
+        "name": "system_dingtalk_014224562537153949.jsonl",
+        "last_modified": "2026-03-30T23:39:22.370203",
+        "msg_count": 2
+      },
+      {
+        "name": "cron_fe51d7e9.jsonl",
+        "last_modified": "2026-03-30T17:30:38.970906",
+        "msg_count": 6
+      },
+      {
+        "name": "cron_0b782eac.jsonl",
+        "last_modified": "2026-03-30T17:15:14.692418",
+        "msg_count": 4
+      },
+      {
+        "name": "cron_ffe58af6.jsonl",
+        "last_modified": "2026-03-30T17:01:04.297201",
+        "msg_count": 6
+      },
+      {
+        "name": "cron_1c483829.jsonl",
+        "last_modified": "2026-03-30T16:45:10.772955",
+        "msg_count": 4
       },
       {
         "name": "cron_597e58df.jsonl",
@@ -68,7 +93,7 @@
       "schedule_text": "在 1774861200000",
       "stop_condition": null,
       "to_target": "014224562537153949",
-      "next_run_ms": 1774861200000
+      "next_run_ms": null
     },
     {
       "id": "1c483829",
@@ -77,7 +102,7 @@
       "schedule_text": "在 1774860300000",
       "stop_condition": null,
       "to_target": "014224562537153949",
-      "next_run_ms": 1774860300000
+      "next_run_ms": null
     },
     {
       "id": "fe51d7e9",
@@ -86,7 +111,7 @@
       "schedule_text": "在 1774863000000",
       "stop_condition": null,
       "to_target": "014224562537153949",
-      "next_run_ms": 1774863000000
+      "next_run_ms": null
     },
     {
       "id": "0b782eac",
@@ -95,7 +120,7 @@
       "schedule_text": "在 1774862100000",
       "stop_condition": null,
       "to_target": "014224562537153949",
-      "next_run_ms": 1774862100000
+      "next_run_ms": null
     }
   ],
   "events": []

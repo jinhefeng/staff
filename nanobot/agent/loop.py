@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 import time
 import weakref
 from datetime import datetime
+# ... [rest of imports]
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -133,8 +135,9 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
+        self.memory_store = MemoryStore(workspace)
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -231,6 +234,13 @@ class AgentLoop:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
+                if hasattr(tool, "set_context"):
+                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+
+    def _set_tool_context_on_registry(self, registry: ToolRegistry, channel: str, chat_id: str, message_id: str | None = None) -> None:
+        """Update context for all tools that need routing info in a specific registry."""
+        for name in ("message", "spawn", "cron"):
+            if tool := registry.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
 
@@ -347,6 +357,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        tools: ToolRegistry | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -355,7 +366,10 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
-        tool_defs = self.tools.get_definitions() if self.tool_use else None
+        # Use provided tools or fall back to self.tools
+        active_tools = tools or self.tools
+
+        tool_defs = active_tools.get_definitions() if self.tool_use else None
         tools_disabled = not self.tool_use
         if tools_disabled:
             logger.info("Tool use disabled by config for model {}", self.model)
@@ -470,7 +484,7 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = await active_tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -550,8 +564,9 @@ class AgentLoop:
 
 
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under the session lock."""
+        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
+        async with lock:
             try:
                 # --- [SESSION QUOTE RECOVERY (Scheme N: Scenario-aware Thread)] ---
                 quote_id = msg.metadata.get("quote_msg_id")
@@ -710,7 +725,20 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            
+            # --- [TOOL CONTEXT ISOLATION] ---
+            from nanobot.agent.tools.registry import ToolRegistry
+            local_tools = ToolRegistry()
+            # Tools that need context isolation
+            stateful_tools = {"message", "spawn", "cron", "escalate_to_master", "defer_to_background", "send_cross_chat", "search_chat_history", "read_full_profile"}
+            for name in self.tools.tool_names:
+                tool = self.tools.get(name)
+                if name in stateful_tools:
+                    tool = copy.copy(tool)
+                local_tools.register(tool)
+
+            self._set_tool_context_on_registry(local_tools, channel, chat_id, msg.metadata.get("message_id"))
+            
             history = session.get_history(max_messages=self.memory_window)
             
             is_master_identity = False
@@ -726,7 +754,7 @@ class AgentLoop:
                 is_master=is_master_identity,
                 current_user_id=msg.sender_id
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(messages, tools=local_tools)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -763,9 +791,10 @@ class AgentLoop:
         conv_type = msg.metadata.get("conversation_type")
         conv_title = msg.metadata.get("conversation_title")
         if conv_type == "2" and conv_title:
-            MemoryStore(self.workspace).save_group_info(msg.chat_id, conv_title)
+            await self.memory_store.save_group_info(msg.chat_id, conv_title)
 
-        # Slash commands
+        # Scheme D: Atomic processing
+
         cmd = msg.content.strip().lower()
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
@@ -852,38 +881,49 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        # --- [TOOL CONTEXT ISOLATION] ---
+        from nanobot.agent.tools.registry import ToolRegistry
+        local_tools = ToolRegistry()
+        # Tools that need context isolation
+        stateful_tools = {"message", "spawn", "cron", "escalate_to_master", "defer_to_background", "send_cross_chat", "search_chat_history", "read_full_profile", "memorize_fact"}
+        for name in self.tools.tool_names:
+            tool = self.tools.get(name)
+            if name in stateful_tools:
+                tool = copy.copy(tool)
+            local_tools.register(tool)
+
+        self._set_tool_context_on_registry(local_tools, msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         
-        if mem_tool := self.tools.get("memorize_fact"):
+        if mem_tool := local_tools.get("memorize_fact"):
             if isinstance(mem_tool, MemorizeFactTool):
                 mem_tool.set_context(is_master=is_master_identity)
 
-        if message_tool := self.tools.get("message"):
+        if message_tool := local_tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
         
-        if escalate_tool := self.tools.get("escalate_to_master"):
+        if escalate_tool := local_tools.get("escalate_to_master"):
             if isinstance(escalate_tool, EscalateToMasterTool):
                 sender_name = msg.metadata.get("sender_name", "")
                 escalate_tool.start_turn(msg.channel, msg.chat_id, msg.sender_id, guest_name=sender_name)
 
-        if defer_tool := self.tools.get("defer_to_background"):
+        if defer_tool := local_tools.get("defer_to_background"):
             from nanobot.agent.tools.defer import DeferTaskTool
             if isinstance(defer_tool, DeferTaskTool):
                 sender_name = msg.metadata.get("sender_name", "")
                 defer_tool.start_turn(msg.channel, msg.chat_id, msg.sender_id, guest_name=sender_name)
 
-        if cross_chat_tool := self.tools.get("send_cross_chat"):
+        if cross_chat_tool := local_tools.get("send_cross_chat"):
             if isinstance(cross_chat_tool, SendCrossChatTool):
                 # Identity grants cross-chat permissions regardless of group context
                 cross_chat_tool.set_context(sender_id=msg.sender_id, is_master=is_master_identity)
 
-        if search_tool := self.tools.get("search_chat_history"):
+        if search_tool := local_tools.get("search_chat_history"):
             from workspace.skills.staff_memory_expert.logic import SearchChatHistoryTool
             if isinstance(search_tool, SearchChatHistoryTool):
                 search_tool.set_context(user_id=msg.sender_id, is_master=is_master_identity)
 
-        if profile_tool := self.tools.get("read_full_profile"):
+        if profile_tool := local_tools.get("read_full_profile"):
             from workspace.skills.staff_memory_expert.logic import ReadFullProfileTool
             if isinstance(profile_tool, ReadFullProfileTool):
                 profile_tool.set_context(user_id=msg.sender_id, is_master=is_master_identity)
@@ -953,6 +993,7 @@ class AgentLoop:
 
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            tools=local_tools
         )
 
         if final_content is None:
@@ -983,7 +1024,7 @@ class AgentLoop:
         # Scheme D: Atomic Sync Send
         # If we have content to send, publish it now and WAIT for the receipt before saving
         remote_msg_id = None
-        is_msg_tool = (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn
+        is_msg_tool = (mt := local_tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn
         
         if not is_msg_tool:
             outbound = OutboundMessage(
@@ -1037,8 +1078,7 @@ class AgentLoop:
 
         # Ensure guest memory file exists for non-master users on first contact.
         if not is_master_identity and msg.sender_id not in ("Unknown", "user"):
-            mem_store = MemoryStore(self.workspace)
-            guest_file = mem_store._get_guest_file(msg.sender_id)
+            guest_file = self.memory_store._get_guest_file(msg.sender_id)
             if not guest_file.exists():
                 from datetime import datetime as _dt
                 sender_name = msg.metadata.get("sender_name", "")
@@ -1048,7 +1088,7 @@ class AgentLoop:
                     f"- 首次互动: {_dt.now().strftime('%Y-%m-%d %H:%M')}\n"
                     f"- 来源: {msg.channel}\n"
                 )
-                mem_store.write_guest(msg.sender_id, initial)
+                self.memory_store.write_guest(msg.sender_id, initial)
                 logger.info("Created initial guest memory for {} ({})", sender_name, msg.sender_id)
 
         if not is_msg_tool:

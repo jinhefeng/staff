@@ -58,6 +58,7 @@ class MemorizeFactTool(Tool):
             updated_global = current_global + f"\n\n## Dynamic Learnt Facts\n{new_entry}"
         else:
             updated_global = current_global + f"{new_entry}"
-            
-        self.memory.write_global(updated_global)
+
+        await self.memory.write_global(updated_global)
         return "SUCCESS: The fact has been permanently recorded in the core memory bank."
+
